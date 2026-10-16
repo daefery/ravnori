@@ -40,8 +40,8 @@ Three weeks after an agent changed your code, you want to know why. The chat is 
 the commit message says "fix tests".
 
 Most memory tools can't help, because they write a summary while you work, through a hook
-that has to succeed, and keep only the summary. When the hook misfires or the model is
-busy, that session is never saved, and nothing tells you.
+that has to run, and keep little of what the summary came from. When the hook never runs,
+that session is never saved, and nothing tells you.
 
 ravnori works from the transcripts instead. Claude Code, Codex and pi already save every
 prompt, command and edit to disk. ravnori reads those files, so:
@@ -265,10 +265,10 @@ Every command, setting and measurement is in [docs/reference.md](docs/reference.
 
 | | ravnori | Tools that write memories during the session |
 |---|---|---|
-| A hook or model call fails | the memory waits; the session is read again from its transcript | that session's memory can be lost |
-| Where a memory came from | points to the transcript lines | not kept by the tools we checked |
+| A hook or model call fails | the memory waits; the session is read again from its transcript | a hook that never runs leaves nothing to recover |
+| Where a memory came from | points to the transcript lines | at best a batch of raw tool calls (claude-mem); most keep nothing |
 | Is its code still there? | checked for each memory | not tracked by the tools we checked |
-| Agents | Claude Code, Codex and pi, one shared memory | some cover more (up to 9) |
+| Agents | Claude Code, Codex and pi, one shared memory | some cover more (claude-mem 10+) |
 | What you run | one binary | often Node, Python or a vector database |
 
 Thirteen tools compared in detail, with sources: [the comparison and roadmap](https://daefery.github.io/ravnori/comparison.html).
