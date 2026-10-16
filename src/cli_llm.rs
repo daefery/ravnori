@@ -22,6 +22,10 @@ pub enum Cli {
 }
 
 impl Cli {
+    /// Every command line, in the order one is picked: Claude Code first (most teams have
+    /// it), then Codex.
+    pub const ALL: [Cli; 2] = [Cli::Claude, Cli::Codex];
+
     pub fn from_name(name: &str) -> Option<Cli> {
         match name {
             "claude-cli" => Some(Cli::Claude),
@@ -61,13 +65,25 @@ impl Cli {
     }
 
     /// The arguments for one request; the prompt itself goes on stdin. `out` is where
-    /// codex writes its final message.
-    pub fn args(self, model: &str, system: &str, cwd: &Path, out: &Path) -> Vec<String> {
+    /// codex writes its final message. With `schema` (a JSON Schema), the command itself
+    /// holds the reply to that shape: claude takes it inline, codex from `schema_file`
+    /// in `cwd`, which `call` writes.
+    pub fn args(
+        self,
+        model: &str,
+        system: &str,
+        schema: Option<&str>,
+        cwd: &Path,
+        out: &Path,
+    ) -> Vec<String> {
         let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
         match self {
             Cli::Claude => {
                 let mut a = s(&["-p", "--model", model, "--effort", "low"]);
                 a.extend(s(&["--system-prompt", system]));
+                if let Some(schema) = schema {
+                    a.extend(s(&["--json-schema", schema]));
+                }
                 a.extend(s(&[
                     "--tools",
                     "",
@@ -93,6 +109,10 @@ impl Cli {
                     "-C",
                 ]);
                 a.push(cwd.to_string_lossy().into_owned());
+                if schema.is_some() {
+                    a.push("--output-schema".into());
+                    a.push(cwd.join(SCHEMA_FILE).to_string_lossy().into_owned());
+                }
                 a.extend(s(&[
                     "-m",
                     model,
@@ -116,7 +136,8 @@ impl Cli {
     }
 
     /// The reply text from a finished run: claude prints a JSON envelope, codex writes
-    /// its last message to `out`. Err says why there is no usable reply.
+    /// its last message to `out`. Err says why there is no usable reply. A reply held to a
+    /// schema is claude's `structured_output`, which its `result` text may not repeat.
     pub fn reply(self, stdout: &str, out: &Path) -> std::result::Result<String, Failure> {
         match self {
             Cli::Claude => {
@@ -125,6 +146,9 @@ impl Cli {
                 let text = v["result"].as_str().unwrap_or_default().to_string();
                 if v["is_error"].as_bool() == Some(true) {
                     return Err(with_login_hint(self, classify_message(&text)));
+                }
+                if v["structured_output"].is_object() {
+                    return Ok(v["structured_output"].to_string());
                 }
                 Ok(text)
             }
@@ -193,12 +217,17 @@ pub fn locate(cli: Cli) -> Option<PathBuf> {
     crate::agents::command_path(cli.command())
 }
 
+/// Where codex reads a request's schema, in the request's own directory.
+const SCHEMA_FILE: &str = "schema.json";
+
 /// Run one request through `cli` with `model`; the reply text, or why there is none.
+/// `schema`, a JSON Schema, holds the reply to that shape.
 pub fn call(
     cli: Cli,
     model: &str,
     system: &str,
     user: &str,
+    schema: Option<&str>,
     timeout: Duration,
 ) -> std::result::Result<String, Failure> {
     let exe = locate(cli).ok_or_else(|| {
@@ -215,8 +244,12 @@ pub fn call(
         crate::db::now_ms()
     ));
     std::fs::create_dir_all(&dir).map_err(|e| Failure::Endpoint(format!("temp dir: {e}")))?;
+    if let Some(schema) = schema {
+        std::fs::write(dir.join(SCHEMA_FILE), schema)
+            .map_err(|e| Failure::Endpoint(format!("schema file: {e}")))?;
+    }
     let out = dir.join("reply.txt");
-    let result = run(&exe, cli, model, system, user, &dir, &out, timeout);
+    let result = run(&exe, cli, model, system, schema, user, &dir, &out, timeout);
     let _ = std::fs::remove_dir_all(&dir);
     result
 }
@@ -227,13 +260,14 @@ fn run(
     cli: Cli,
     model: &str,
     system: &str,
+    schema: Option<&str>,
     user: &str,
     dir: &Path,
     out: &Path,
     timeout: Duration,
 ) -> std::result::Result<String, Failure> {
     let mut child = Command::new(exe)
-        .args(cli.args(model, system, dir, out))
+        .args(cli.args(model, system, schema, dir, out))
         .current_dir(dir)
         // Thinking costs several times the answer and did not improve memories.
         .env("MAX_THINKING_TOKENS", "0")
@@ -356,12 +390,14 @@ mod tests {
     #[test]
     fn every_run_is_isolated_from_the_users_setup_and_from_ravnori() {
         let (dir, out) = (Path::new("/tmp/d"), Path::new("/tmp/d/reply.txt"));
-        let c = Cli::Claude.args("sonnet", "SYS", dir, out);
+        let c = Cli::Claude.args("sonnet", "SYS", None, dir, out);
+        assert!(!c.contains(&"--json-schema".into()));
         assert!(has(&c, "--tools", "") && has(&c, "--setting-sources", ""));
         assert!(c.contains(&"--strict-mcp-config".into()));
         assert!(c.contains(&"--no-session-persistence".into()));
         assert!(has(&c, "--system-prompt", "SYS") && has(&c, "--model", "sonnet"));
-        let x = Cli::Codex.args("gpt-5.6-luna", "SYS", dir, out);
+        let x = Cli::Codex.args("gpt-5.6-luna", "SYS", None, dir, out);
+        assert!(!x.contains(&"--output-schema".into()));
         // Hooks off: otherwise codex runs ravnori's own hooks and every request would
         // become a session ravnori captures and distils.
         assert!(has(&x, "--disable", "hooks"));
@@ -458,6 +494,23 @@ mod tests {
         let text = failure_text(Cli::Claude, envelope, "");
         assert!(text.starts_with("Failed to authenticate"), "{text}");
         assert!(matches!(classify_message(&text), Failure::Endpoint(_)));
+    }
+
+    #[test]
+    fn a_schema_holds_each_command_to_the_reply_shape() {
+        let (dir, out) = (Path::new("/tmp/d"), Path::new("/tmp/d/reply.txt"));
+        let c = Cli::Claude.args("sonnet", "SYS", Some("{}"), dir, out);
+        assert!(has(&c, "--json-schema", "{}"));
+        let x = Cli::Codex.args("gpt-5.6-luna", "SYS", Some("{}"), dir, out);
+        assert!(has(&x, "--output-schema", "/tmp/d/schema.json"));
+        assert_eq!(x.last().map(String::as_str), Some("-"));
+        // claude 2.1.294 puts the shaped reply in `structured_output`; its `result` may be
+        // prose around it, or nothing.
+        let none = Path::new("/nonexistent/reply.txt");
+        let shaped = r#"{"is_error":false,"result":"Here it is.","structured_output":{"answer":"A [E1]","cited":["E1"]}}"#;
+        let text = Cli::Claude.reply(shaped, none).unwrap();
+        let v: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(v["answer"], "A [E1]");
     }
 
     #[test]

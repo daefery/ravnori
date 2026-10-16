@@ -682,18 +682,22 @@ fn main() -> Result<()> {
                     }
                 }
             };
-            let configured = distill::not_configured(&ravnori::config::CONFIG.distill).is_none();
-            if sources || !configured {
+            let models = if sources {
+                Vec::new()
+            } else {
+                ravnori::ask::answerers()?
+            };
+            if models.is_empty() {
                 print_sources(&[]);
                 print_elsewhere();
-                if !configured && !sources {
-                    println!("\n(no model configured, so these are the sources without an answer)");
+                if !sources {
+                    println!(
+                        "\n(no model to answer with: install Claude Code or Codex, or see `rvn doctor`; these are the sources)"
+                    );
                 }
                 return Ok(());
             }
-            let llm = distill::Llm::from_config()?;
-            llm.load_cooldowns(&conn);
-            match ravnori::ask::answer(&llm, &question, &scope, &found) {
+            match ravnori::ask::answer_with_any(&conn, &models, &question, &scope, &found) {
                 Ok((text, cited)) => {
                     println!("{text}\n");
                     println!("Sources (* cited; full text: rvn search or get_observations):");
@@ -708,7 +712,6 @@ fn main() -> Result<()> {
                     print_sources(&[]);
                 }
             }
-            llm.save_cooldowns(&conn)?;
         }
         Cmd::Trace {
             since,

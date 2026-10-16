@@ -211,19 +211,10 @@ impl Llm {
                 None => {}
             }
             chain.dedup();
-            return Ok(Llm {
-                cli: Some(cli),
-                base_url: String::new(),
-                key: String::new(),
-                chain,
-                // A command line lists no models, so there is nothing to fall back to.
-                auto_fallback: false,
-                exclude_models: c.exclude_models.clone(),
-                exclude_providers: vec![],
-                cooldowns: Default::default(),
-                requests: Default::default(),
-                request_limit: Default::default(),
-            });
+            let mut llm = Self::from_cli(cli);
+            llm.chain = chain;
+            llm.exclude_models = c.exclude_models.clone();
+            return Ok(llm);
         }
         let key = if let Some(env) = &c.api_key_env {
             std::env::var(env).with_context(|| format!("env {env} not set"))?
@@ -261,6 +252,31 @@ impl Llm {
             requests: Default::default(),
             request_limit: Default::default(),
         })
+    }
+
+    /// A coding agent's command line with its default model, as its user is signed in.
+    pub fn from_cli(cli: crate::cli_llm::Cli) -> Llm {
+        Llm {
+            cli: Some(cli),
+            base_url: String::new(),
+            key: String::new(),
+            chain: cli.default_chain().iter().map(|s| s.to_string()).collect(),
+            // A command line lists no models, so there is nothing to fall back to.
+            auto_fallback: false,
+            exclude_models: vec![],
+            exclude_providers: vec![],
+            cooldowns: Default::default(),
+            requests: Default::default(),
+            request_limit: Default::default(),
+        }
+    }
+
+    /// What this client is, for a person: `claude`, `codex` or the endpoint's address.
+    pub fn label(&self) -> String {
+        match self.cli {
+            Some(c) => c.command().to_string(),
+            None => self.base_url.clone(),
+        }
     }
 
     fn agent(timeout: u64) -> ureq::Agent {
@@ -372,6 +388,15 @@ impl Llm {
 
     /// Any JSON task through the same model chain, fallback and cooldowns.
     pub fn ask(&self, system: &str, user: &str) -> Result<(Value, String)> {
+        self.ask_as(system, user, None)
+    }
+
+    /// `ask`, with the reply held to `shape`.
+    pub fn ask_shaped(&self, system: &str, user: &str, shape: &Shape) -> Result<(Value, String)> {
+        self.ask_as(system, user, Some(shape))
+    }
+
+    fn ask_as(&self, system: &str, user: &str, shape: Option<&Shape>) -> Result<(Value, String)> {
         let mut tried = Vec::new();
         for model in self.candidates() {
             if self
@@ -381,7 +406,7 @@ impl Llm {
             {
                 bail!("daily request budget reached after: {}", tried.join("; "));
             }
-            match self.call(&model, system, user) {
+            match self.call(&model, system, user, shape) {
                 Ok(v) => return Ok((v, model)),
                 Err(Failure::NextModel(cool_ms, why)) => {
                     if cool_ms > 0 {
@@ -400,11 +425,24 @@ impl Llm {
         bail!("every model failed: {}", tried.join("; "))
     }
 
-    fn call(&self, model: &str, system: &str, user: &str) -> std::result::Result<Value, Failure> {
+    fn call(
+        &self,
+        model: &str,
+        system: &str,
+        user: &str,
+        shape: Option<&Shape>,
+    ) -> std::result::Result<Value, Failure> {
         if let Some(cli) = self.cli {
             self.requests.set(self.requests.get() + 1);
-            let text = crate::cli_llm::call(cli, model, system, user, Duration::from_secs(300))?;
-            return json_in(&text);
+            let text = crate::cli_llm::call(
+                cli,
+                model,
+                system,
+                user,
+                shape.map(|s| s.schema),
+                Duration::from_secs(300),
+            )?;
+            return read_reply(&text, shape);
         }
         let body = json!({
             "model": model,
@@ -428,10 +466,11 @@ impl Llm {
             .body_mut()
             .read_json()
             .map_err(|e| Failure::NextModel(0, format!("bad response: {e}")))?;
-        json_in(
+        read_reply(
             v["choices"][0]["message"]["content"]
                 .as_str()
                 .unwrap_or_default(),
+            shape,
         )
     }
 
@@ -777,11 +816,70 @@ mod chain_tests {
     }
 
     #[test]
+    fn a_reply_in_plain_words_is_kept_only_where_words_are_the_answer() {
+        let shape = Shape {
+            schema: "{}",
+            prose: Some("answer"),
+        };
+        // What sonnet returned for 2 of 8 `rvn ask` runs on 16 Oct: a cited answer, no JSON.
+        let words = "- PIP: the parent task and five subtasks were created [E60329].";
+        let v = read_reply(words, Some(&shape)).unwrap();
+        assert_eq!(v["answer"], words);
+        // JSON with the answer is read as JSON, prose or fence around it or not.
+        let fenced = "Here:\n```json\n{\"answer\": \"A [E1]\", \"cited\": [\"E1\"]}\n```";
+        let v = read_reply(fenced, Some(&shape)).unwrap();
+        assert_eq!(
+            (v["answer"].as_str(), v["cited"][0].as_str()),
+            (Some("A [E1]"), Some("E1"))
+        );
+        // Words that quote some other JSON are still the words.
+        let quoting = "The check replies with {\"ok\": true} [E2].";
+        assert_eq!(
+            read_reply(quoting, Some(&shape)).unwrap()["answer"],
+            quoting
+        );
+        // Nothing at all is still a failure, and without a prose field (distillation)
+        // plain words fail as before, so the chain moves on.
+        assert!(read_reply("  ", Some(&shape)).is_err());
+        assert!(matches!(
+            read_reply(words, None),
+            Err(Failure::NextModel(0, _))
+        ));
+    }
+
+    #[test]
     fn quota_errors_cool_down_and_move_on() {
         assert!(matches!(classify_status(429), Failure::NextModel(ms, _) if ms >= 30 * 60_000));
         assert!(matches!(classify_status(404), Failure::NextModel(ms, _) if ms > 60 * 60_000));
         assert!(matches!(classify_status(401), Failure::Endpoint(_)));
         assert!(matches!(classify_status(503), Failure::NextModel(_, _)));
+    }
+}
+
+/// What a reply must look like. `schema`, a JSON Schema, is given to a coding agent's
+/// command line, which holds the model to it (an endpoint is already asked for a JSON
+/// object). `prose`: when the model still answers in plain words, they are kept as this
+/// field instead of the request failing, for a task whose answer is words anyway.
+pub struct Shape {
+    pub schema: &'static str,
+    pub prose: Option<&'static str>,
+}
+
+/// The reply as JSON, read as `shape` says.
+fn read_reply(text: &str, shape: Option<&Shape>) -> std::result::Result<Value, Failure> {
+    let parsed = json_in(text);
+    let Some(field) = shape.and_then(|s| s.prose) else {
+        return parsed;
+    };
+    match parsed {
+        Ok(v) if v[field].is_string() => Ok(v),
+        // Plain words, or some other JSON quoted inside them: the words are the answer.
+        _ if !text.trim().is_empty() => {
+            let mut m = serde_json::Map::new();
+            m.insert(field.into(), text.trim().into());
+            Ok(Value::Object(m))
+        }
+        other => other,
     }
 }
 

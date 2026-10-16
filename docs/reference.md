@@ -47,7 +47,7 @@ The first run downloads the embedding model (about 90 MB, once). Linux with glib
 or newer (Ubuntu 24.04, Debian 13, Fedora 40) gets the full build; glibc 2.35 to 2.38
 (Ubuntu 22.04, Debian 12) gets a lite build without ONNX Runtime, whose prebuilt library
 needs glibc 2.38: meaning search then uses the small potion model, everything else is the
-same. Intel Macs get the lite build too, since ONNX Runtime ships no library for them. Windows: use WSL. `RAVNORI_VERSION=v0.6.0`
+same. Intel Macs get the lite build too, since ONNX Runtime ships no library for them. Windows: use WSL. `RAVNORI_VERSION=v0.6.1`
 picks a release, `RAVNORI_BIN_DIR` another folder, `RAVNORI_NO_SETUP=1` installs only the
 binary. To build from source instead, see Build below.
 
@@ -97,7 +97,7 @@ attached to the release.
 | `rvn distill` / `rvn models` | Tier-1 distillation through the model chain / show the chain and cooldowns |
 | `rvn embed` | Download the local embedding model (Model2Vec, 30 MB) and embed memories for semantic recall |
 | `rvn mcp` | MCP server: `search`, `timeline`, `get_observations`, `recall_file`, `remember`, `ask`, `session_start_context` |
-| `rvn ask <question> [--project P \| --all] [--since D --until D] [--as-of T] [--sources]` | Ask about past agent work, answered by your distillation model from the record: memories, your pinned facts, your prompts and agents' replies, citing only sources it was shown (`#id` memories, `E<id>` events), each memory with whether its code is still there. A question about a time ("yesterday", "last week", "on 4 October", "kemarin") is read in your local time and looks in every project unless one is named; others look in this directory's project and never widen on their own. `--since/--until` set the time, `--as-of` replays a past question with only what existed then, `--sources` lists sources without a model |
+| `rvn ask <question> [--project P \| --all] [--since D --until D] [--as-of T] [--sources]` | Ask about past agent work, answered from the record by your distillation model, or, when none is set up or it fails, by the Claude Code or Codex you are signed in to: memories, your pinned facts, your prompts and agents' replies, citing only sources it was shown (`#id` memories, `E<id>` events), each memory with whether its code is still there. A question about a time ("yesterday", "last week", "on 4 October", "kemarin") is read in your local time and looks in every project unless one is named; others look in this directory's project and never widen on their own. `--since/--until` set the time, `--as-of` replays a past question with only what existed then, `--sources` lists sources without a model |
 | `rvn eval --history history-dev\|history-test` | Score `rvn ask` on real past-work questions replayed as of when they were asked, graded by a judge model (`~/.ravnori/eval/history-*.jsonl`; tune on dev, look at test once per change) |
 | `rvn trace [--commits N \| --since REV] [--out DIR]` | [Agent Trace](https://agent-trace.dev) records for this repository's commits: which lines each commit added were written by an agent, by session and model, worked out from the transcripts ravnori already holds, so it covers commits made before any tracing tool was installed. Exact line matches only (a floor: files written by shell commands are not seen); edits in other worktrees or clones of the same repository count |
 | `rvn api` | The record API for your own tools (read-only HTTP, token auth): address, token and an example. See [docs/api.md](api.md) |

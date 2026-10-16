@@ -151,7 +151,7 @@ fn distillation(p: &Plan) -> Result<()> {
     if crate::distill::not_configured(cfg).is_none() {
         return Ok(());
     }
-    let found: Vec<crate::cli_llm::Cli> = [crate::cli_llm::Cli::Claude, crate::cli_llm::Cli::Codex]
+    let found: Vec<crate::cli_llm::Cli> = crate::cli_llm::Cli::ALL
         .into_iter()
         .filter(|c| crate::cli_llm::locate(*c).is_some())
         .collect();
@@ -230,6 +230,7 @@ fn answers(cli: crate::cli_llm::Cli) -> std::result::Result<(), String> {
         model,
         "Reply with JSON only.",
         r#"Reply with exactly: {"ok": true}"#,
+        None,
         std::time::Duration::from_secs(120),
     ) {
         Ok(_) => Ok(()),

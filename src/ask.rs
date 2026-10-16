@@ -59,6 +59,15 @@ recorded. If the sources do not answer the question, say so in one sentence inst
 cite nothing. Never cite an id that was not given.
 Return JSON only: {"answer": "...", "cited": ["#123", "E456"]}"##;
 
+/// The answer's shape, held by a coding agent's command line. A model that still answers
+/// in plain words has answered: the words are kept, and their [#id]/[E id] citations of
+/// sources that were shown still count (`read_answer`). sonnet did so in 2 of 8 asks on
+/// 16 Oct 2026, each a good cited answer that was then thrown away.
+const SHAPE: crate::distill::Shape = crate::distill::Shape {
+    schema: r#"{"type":"object","properties":{"answer":{"type":"string"},"cited":{"type":"array","items":{"type":"string"}}},"required":["answer","cited"],"additionalProperties":false}"#,
+    prose: Some("answer"),
+};
+
 /// Where and when a question looks.
 #[derive(Debug, Clone, Default)]
 pub struct Scope {
@@ -1031,23 +1040,19 @@ pub fn answer_text(conn: &Connection, question: &str, a: Asked) -> Result<String
         return Ok(w);
     }
     add_code_state(conn, &mut found);
-    let cited = match crate::distill::not_configured(&crate::config::CONFIG.distill) {
-        Some(_) => Vec::new(),
-        None => {
-            let llm = Llm::from_config()?;
-            llm.load_cooldowns(conn);
-            let r = answer(&llm, question, &scope, &found);
-            let _ = llm.save_cooldowns(conn);
-            match r {
-                Ok((text, cited)) => {
-                    w.push_str(&text);
-                    w.push_str("\n\n");
-                    cited
-                }
-                Err(e) => {
-                    w.push_str(&format!("(no answer: {e:#}; the sources are below)\n\n"));
-                    Vec::new()
-                }
+    let models = answerers()?;
+    let cited = if models.is_empty() {
+        Vec::new()
+    } else {
+        match answer_with_any(conn, &models, question, &scope, &found) {
+            Ok((text, cited)) => {
+                w.push_str(&text);
+                w.push_str("\n\n");
+                cited
+            }
+            Err(e) => {
+                w.push_str(&format!("(no answer: {e:#}; the sources are below)\n\n"));
+                Vec::new()
             }
         }
     };
@@ -1161,7 +1166,7 @@ pub fn answer(
         scope.project.as_deref().unwrap_or("all")
     ));
     let user = format!("{asked}\nSources:\n{}", shown.join("\n"));
-    let (v, _model) = llm.ask(SYSTEM, &user)?;
+    let (v, _model) = llm.ask_shaped(SYSTEM, &user, &SHAPE)?;
     let (text, cited) = read_answer(&v, sources);
     // What was searched leads a time question's answer, in code, not left to the model:
     // "yesterday" means a date, and "what we did" means the projects it covers.
@@ -1169,6 +1174,63 @@ pub fn answer(
         Some(_) => (format!("{}:\n{text}", headline(scope)), cited),
         None => (text, cited),
     })
+}
+
+/// Who can answer a question, in order: the configured model, then each other coding
+/// agent command line that is installed, as its user is signed in (a signed-out one
+/// fails in seconds and hands the question on). A question is asked now, by the person
+/// waiting, so it is answered even before `rvn install` picked a model (the try-it-first
+/// path) and when the configured one fails. Empty: none, and the sources are the answer.
+pub fn answerers() -> Result<Vec<Llm>> {
+    let cfg = &crate::config::CONFIG.distill;
+    let installed = |c: crate::cli_llm::Cli| crate::cli_llm::locate(c).is_some();
+    let mut out = Vec::new();
+    if crate::distill::not_configured(cfg).is_none() {
+        out.push(Llm::from_config()?);
+    }
+    let configured = cfg
+        .provider
+        .as_deref()
+        .and_then(crate::cli_llm::Cli::from_name);
+    for cli in fallback_clis(configured, installed) {
+        out.push(Llm::from_cli(cli));
+    }
+    Ok(out)
+}
+
+/// The command lines tried after the configured model: every installed one but the one
+/// already configured.
+fn fallback_clis(
+    configured: Option<crate::cli_llm::Cli>,
+    installed: impl Fn(crate::cli_llm::Cli) -> bool,
+) -> Vec<crate::cli_llm::Cli> {
+    crate::cli_llm::Cli::ALL
+        .into_iter()
+        .filter(|c| Some(*c) != configured && installed(*c))
+        .collect()
+}
+
+/// `answer` from the first of `models` that gives one: a signed-out or failing model
+/// hands the question to the next. Each model's cooldowns are kept as `rvn ask` keeps
+/// them. Err lists why each one failed.
+pub fn answer_with_any(
+    conn: &Connection,
+    models: &[Llm],
+    question: &str,
+    scope: &Scope,
+    sources: &[Source],
+) -> Result<(String, Vec<Ref>)> {
+    let mut why = Vec::new();
+    for llm in models {
+        llm.load_cooldowns(conn);
+        let r = answer(llm, question, scope, sources);
+        let _ = llm.save_cooldowns(conn);
+        match r {
+            Ok(a) => return Ok(a),
+            Err(e) => why.push(format!("{}: {e:#}", llm.label())),
+        }
+    }
+    anyhow::bail!("{}", why.join("; "))
 }
 
 /// The scope of a time question as the answer's first line: "Yesterday, 5 October 2026,
@@ -1295,6 +1357,32 @@ mod tests {
             code: None,
             text: String::new(),
         }
+    }
+
+    #[test]
+    fn every_other_installed_command_line_answers_after_the_configured_model() {
+        use crate::cli_llm::Cli;
+        let all = |_: Cli| true;
+        // Nothing configured (the try-it-first path): each installed one, Claude first.
+        assert_eq!(fallback_clis(None, all), vec![Cli::Claude, Cli::Codex]);
+        // Claude configured and signed out: Codex answers next, Claude is not asked twice.
+        assert_eq!(fallback_clis(Some(Cli::Claude), all), vec![Cli::Codex]);
+        assert_eq!(fallback_clis(Some(Cli::Codex), all), vec![Cli::Claude]);
+        // Only what is installed.
+        assert_eq!(fallback_clis(None, |c| c == Cli::Codex), vec![Cli::Codex]);
+        assert!(fallback_clis(None, |_| false).is_empty());
+    }
+
+    #[test]
+    fn a_plain_words_answer_keeps_its_shown_citations() {
+        let shown = [src(Ref::Event(1)), src(Ref::Memory(2))];
+        // What the reply shape keeps when the model answered in words, not JSON.
+        let (text, cited) = read_answer(
+            &json!({ "answer": "Tasks were created [E1] and tracked [#2], see [E9]." }),
+            &shown,
+        );
+        assert_eq!(cited, vec![Ref::Event(1), Ref::Memory(2)]);
+        assert_eq!(text, "Tasks were created [E1] and tracked [#2], see.");
     }
 
     #[test]

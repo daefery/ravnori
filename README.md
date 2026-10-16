@@ -95,13 +95,14 @@ The viewer is at **http://127.0.0.1:37777**.
 
 Want to see what ravnori finds before it touches your setup? This installs only the binary
 and reads your existing transcripts into its own folder. Your agents' settings stay
-exactly as they are.
+exactly as they are. `rvn ask` answers with the Claude Code or Codex you are signed in to.
 
 ```sh
 curl -fsSL https://github.com/daefery/ravnori/releases/latest/download/install.sh | RAVNORI_NO_SETUP=1 sh
-~/.local/bin/rvn backfill                  # read every saved session
-~/.local/bin/rvn search "flaky test"       # search all of them, across agents
-~/.local/bin/rvn doctor                    # what was found, per agent
+~/.local/bin/rvn backfill                        # read every saved session
+~/.local/bin/rvn ask "what did we do last week"  # answered from them, with sources
+~/.local/bin/rvn search "flaky test"             # search all of them, across agents
+~/.local/bin/rvn doctor                          # what was found, per agent
 ```
 
 To undo it, delete `~/.local/bin/rvn` and `~/.ravnori`. To keep it, run `rvn install --watch`.
@@ -135,7 +136,7 @@ meaning-based search.
 <details>
 <summary><b>Options and older systems</b></summary>
 
-- `RAVNORI_VERSION=v0.6.0` picks a release, `RAVNORI_BIN_DIR` another folder, and
+- `RAVNORI_VERSION=v0.6.1` picks a release, `RAVNORI_BIN_DIR` another folder, and
   `RAVNORI_NO_SETUP=1` installs only the binary.
 - Linux with glibc 2.35 to 2.38 (Ubuntu 22.04, Debian 12) and Intel Macs get a "lite"
   build: the same ravnori, with a smaller model for meaning-based search.
