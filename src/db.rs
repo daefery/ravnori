@@ -354,6 +354,14 @@ pub fn open_with(path: &Path, busy: Duration) -> Result<Connection> {
     }
     conn.pragma_update(None, "synchronous", "NORMAL")?;
     let version: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
+    // An older build must not run its schema over a newer database and stamp its own
+    // (lower) version on it: the newer build would then skip migrations it already ran.
+    anyhow::ensure!(
+        version <= SCHEMA_VERSION,
+        "{} was written by a newer ravnori (schema {version}, this build reads up to {SCHEMA_VERSION}); \
+         update ravnori, or check which rvn is first on your PATH",
+        path.display()
+    );
     if version != SCHEMA_VERSION {
         conn.execute_batch(SCHEMA)?;
         migrate(&conn)?;
@@ -506,6 +514,26 @@ fn migrate(conn: &Connection) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An older build refuses a database a newer build has written, and leaves it as it was.
+    #[test]
+    fn newer_database_is_refused_untouched() {
+        let d = crate::TempDir::new("newer-db");
+        let path = d.join("m.db");
+        drop(open(&path).unwrap());
+        let newer = SCHEMA_VERSION + 1;
+        Connection::open(&path)
+            .unwrap()
+            .pragma_update(None, "user_version", newer)
+            .unwrap();
+        let err = open(&path).unwrap_err().to_string();
+        assert!(err.contains("newer ravnori"), "{err}");
+        let after: i64 = Connection::open(&path)
+            .unwrap()
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap();
+        assert_eq!(after, newer);
+    }
 
     /// The time indexes (schema 23) only make queries faster: every date-ordered list
     /// returns the same rows in the same order as without them, ties in time included.
