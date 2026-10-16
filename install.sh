@@ -8,7 +8,7 @@
 # checksums, puts it in ~/.local/bin (RAVNORI_BIN_DIR to change), then runs
 # `rvn install --watch`: connects Claude Code, Codex and pi, starts the background
 # service, and sets up distillation through Claude Code or Codex if nothing is set.
-# RAVNORI_VERSION=v0.6.0 picks a release; RAVNORI_NO_SETUP=1 only installs the binary.
+# RAVNORI_VERSION=v0.6.1 picks a release; RAVNORI_NO_SETUP=1 only installs the binary.
 # MNEM_*: the same settings under ravnori's name before 0.6.0 (read until 0.7.0).
 set -eu
 
