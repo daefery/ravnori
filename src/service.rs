@@ -77,12 +77,15 @@ impl Manager {
         }
     }
 
-    /// Load and start the service written to `file()`; whether that worked.
+    /// Load and (re)start the service written to `file()`; whether that worked. A running
+    /// service is restarted, so an upgrade runs the new binary, not the old one kept in
+    /// memory (`enable --now` alone leaves a running service as it is).
     pub fn start(self) -> bool {
         match self {
             Manager::Systemd => {
                 run("systemctl", &["--user", "daemon-reload"])
-                    && run("systemctl", &["--user", "enable", "--now", UNIT])
+                    && run("systemctl", &["--user", "enable", UNIT])
+                    && run("systemctl", &["--user", "restart", UNIT])
             }
             Manager::Launchd => {
                 let target = gui_target();
@@ -146,6 +149,14 @@ impl Manager {
             Manager::Launchd => {
                 format!("launchctl bootstrap gui/$(id -u) {}", self.file().display())
             }
+        }
+    }
+
+    /// The command a user runs to restart it, so it runs the binary installed now.
+    pub fn restart_hint(self) -> String {
+        match self {
+            Manager::Systemd => format!("systemctl --user restart {UNIT}"),
+            Manager::Launchd => format!("launchctl kickstart -k gui/$(id -u)/{LABEL}"),
         }
     }
 

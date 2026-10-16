@@ -27,8 +27,38 @@ pub fn alerts(conn: &Connection, stuck_files: usize) -> Vec<String> {
             "the rvn watch service is not running ({})",
             m.start_hint()
         ));
+    } else if watch_installed() {
+        out.extend(old_watch(
+            watch_report(conn).as_ref(),
+            env!("CARGO_PKG_VERSION"),
+        ));
     }
     out
+}
+
+/// A service still running an older ravnori than this one (an upgrade that did not
+/// restart it): it keeps capturing with the old code until restarted.
+fn old_watch(report: Option<&serde_json::Value>, mine: &str) -> Option<String> {
+    // Reports from before 0.6.2 carry no version: such a service is old by definition.
+    let theirs = report?
+        .get("version")
+        .map_or(Some("0.6.1 or older"), |v| v.as_str())?;
+    (theirs != mine).then(|| {
+        format!(
+            "ravnori-watch runs ravnori {theirs}, but {mine} is installed: restart it ({})",
+            crate::service::manager().restart_hint()
+        )
+    })
+}
+
+fn watch_report(conn: &Connection) -> Option<serde_json::Value> {
+    conn.query_row("SELECT v FROM meta WHERE k = 'health.watch'", [], |r| {
+        r.get::<_, String>(0)
+    })
+    .optional()
+    .ok()
+    .flatten()
+    .and_then(|s| serde_json::from_str(&s).ok())
 }
 
 fn stuck_message(n: usize) -> String {
@@ -41,7 +71,12 @@ fn stuck_message(n: usize) -> String {
 pub fn record_watch_report(conn: &Connection, stuck_files: usize) -> anyhow::Result<()> {
     conn.execute(
         "INSERT INTO meta(k, v) VALUES ('health.watch', ?1) ON CONFLICT(k) DO UPDATE SET v = excluded.v",
-        [serde_json::json!({ "at": db::now_ms(), "stuck": stuck_files }).to_string()],
+        [serde_json::json!({
+            "at": db::now_ms(),
+            "stuck": stuck_files,
+            "version": env!("CARGO_PKG_VERSION"),
+        })
+        .to_string()],
     )?;
     Ok(())
 }
@@ -50,14 +85,7 @@ pub fn record_watch_report(conn: &Connection, stuck_files: usize) -> anyhow::Res
 /// from the watcher's last report; a stale report means the watcher is not running.
 pub fn for_hook(conn: &Connection) -> Vec<String> {
     let mut out = Vec::new();
-    let report: Option<serde_json::Value> = conn
-        .query_row("SELECT v FROM meta WHERE k = 'health.watch'", [], |r| {
-            r.get::<_, String>(0)
-        })
-        .optional()
-        .ok()
-        .flatten()
-        .and_then(|s| serde_json::from_str(&s).ok());
+    let report = watch_report(conn);
     if watch_installed() {
         match report {
             Some(r) => {
@@ -68,8 +96,11 @@ pub fn for_hook(conn: &Connection) -> Vec<String> {
                         ago(age),
                         crate::service::manager().status_hint()
                     ));
-                } else if let Some(n) = r["stuck"].as_u64().filter(|n| *n > 0) {
-                    out.push(stuck_message(n as usize));
+                } else {
+                    if let Some(n) = r["stuck"].as_u64().filter(|n| *n > 0) {
+                        out.push(stuck_message(n as usize));
+                    }
+                    out.extend(old_watch(Some(&r), env!("CARGO_PKG_VERSION")));
                 }
             }
             None => out.push(format!(
@@ -223,4 +254,28 @@ fn has_complete_line(path: &str, offset: u64) -> bool {
 
 fn watch_installed() -> bool {
     crate::service::manager().file().exists()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::old_watch;
+    use serde_json::json;
+
+    #[test]
+    fn a_service_running_another_version_is_named() {
+        // The service of 17 Oct 2026: upgraded on disk, still running the old binary.
+        let old = old_watch(Some(&json!({ "at": 1, "stuck": 0 })), "0.6.2").unwrap();
+        assert!(
+            old.starts_with("ravnori-watch runs ravnori 0.6.1 or older, but 0.6.2 is installed"),
+            "{old}"
+        );
+        let other = old_watch(Some(&json!({ "version": "0.7.0" })), "0.6.2").unwrap();
+        assert!(other.contains("runs ravnori 0.7.0"), "{other}");
+        // The same version, or no report yet (\"never reported\" says that), is no alert.
+        assert_eq!(
+            old_watch(Some(&json!({ "version": "0.6.2" })), "0.6.2"),
+            None
+        );
+        assert_eq!(old_watch(None, "0.6.2"), None);
+    }
 }

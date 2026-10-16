@@ -51,7 +51,7 @@ const MONTHS: [(&str, i64); 24] = [
 
 /// A month name or its three-letter-or-longer abbreviation ("oct", "agu"). Only read
 /// next to a day number, so "may I ask" or "march on" are never dates.
-fn month(word: &str) -> Option<i64> {
+pub(crate) fn month(word: &str) -> Option<i64> {
     let w = word.trim_end_matches('.');
     if w.len() < 3 {
         return None;

@@ -1167,13 +1167,143 @@ pub fn answer(
     ));
     let user = format!("{asked}\nSources:\n{}", shown.join("\n"));
     let (v, _model) = llm.ask_shaped(SYSTEM, &user, &SHAPE)?;
-    let (text, cited) = read_answer(&v, sources);
+    let (mut text, mut cited) = read_answer(&v, sources);
+    // A date no source shows is a slip (sonnet once wrote 2016 for 2026): ask once more,
+    // naming it, and say so if it stays.
+    let known = known_dates(question, scope, sources);
+    let wrong = unsupported_dates(&text, &known);
+    if !wrong.is_empty() {
+        crate::hook::log(&format!(
+            "ask dates: none of the sources shows {}",
+            wrong.join(", ")
+        ));
+        let again = format!(
+            "{user}\n\nYour previous answer gave dates that no source shows: {}. Answer again, giving only dates the sources show.",
+            wrong.join(", ")
+        );
+        if let Ok((v, _)) = llm.ask_shaped(SYSTEM, &again, &SHAPE) {
+            let (t, c) = read_answer(&v, sources);
+            if !t.is_empty() {
+                (text, cited) = (t, c);
+            }
+        }
+        let still = unsupported_dates(&text, &known);
+        if !still.is_empty() {
+            text.push_str(&format!(
+                "\n\n(Check: no source shows {}.)",
+                still.join(" or ")
+            ));
+        }
+    }
     // What was searched leads a time question's answer, in code, not left to the model:
     // "yesterday" means a date, and "what we did" means the projects it covers.
     Ok(match &scope.window {
         Some(_) => (format!("{}:\n{text}", headline(scope)), cited),
         None => (text, cited),
     })
+}
+
+/// A calendar date as written: the year only when it was given.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Date {
+    year: Option<i64>,
+    month: i64,
+    day: i64,
+}
+
+impl Date {
+    /// The same day: month and day agree, and the year too when both give one.
+    fn agrees(&self, o: &Date) -> bool {
+        self.month == o.month
+            && self.day == o.day
+            && (self.year.is_none() || o.year.is_none() || self.year == o.year)
+    }
+}
+
+fn ymd(ms: i64, offset_min: i64) -> Date {
+    let (y, m, d) = crate::text::civil_from_days((ms + offset_min * 60_000).div_euclid(86_400_000));
+    Date {
+        year: Some(y),
+        month: m,
+        day: d,
+    }
+}
+
+/// The calendar dates written in `text` with the words that wrote them: "2026-10-16",
+/// "16 October 2026", "Oct 2", "16 okt". A day number counts only next to a month name.
+fn dates_in(text: &str) -> Vec<(String, Date)> {
+    static ISO: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"\b(\d{4})-(\d{1,2})-(\d{1,2})(?:\D|$)").expect("valid regex")
+    });
+    static DAY_MONTH: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"(?i)\b(\d{1,2})\s+([a-z]{3,9})\.?(?:,?\s+(\d{4}))?\b")
+            .expect("valid regex")
+    });
+    static MONTH_DAY: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"(?i)\b([a-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?\b(?:,?\s+(\d{4}))?")
+            .expect("valid regex")
+    });
+    let num = |c: Option<regex::Match>| c.and_then(|m| m.as_str().parse::<i64>().ok());
+    let ok = |d: &Date| (1..=12).contains(&d.month) && (1..=31).contains(&d.day);
+    let mut out = Vec::new();
+    for c in ISO.captures_iter(text) {
+        let d = Date {
+            year: num(c.get(1)),
+            month: num(c.get(2)).unwrap_or(0),
+            day: num(c.get(3)).unwrap_or(0),
+        };
+        if ok(&d) {
+            out.push((format!("{}-{}-{}", &c[1], &c[2], &c[3]), d));
+        }
+    }
+    for (re, day_at, month_at) in [(&*DAY_MONTH, 1, 2), (&*MONTH_DAY, 2, 1)] {
+        for c in re.captures_iter(text) {
+            // "may 2 more" is a verb; the month is written "May".
+            if &c[month_at] == "may" {
+                continue;
+            }
+            let Some(month) = crate::when::month(&c[month_at].to_lowercase()) else {
+                continue;
+            };
+            let d = Date {
+                year: num(c.get(3)),
+                month,
+                day: num(c.get(day_at)).unwrap_or(0),
+            };
+            if ok(&d) {
+                out.push((c[0].trim().to_string(), d));
+            }
+        }
+    }
+    out
+}
+
+/// Every date an answer may give: each source's own date and the dates its text names,
+/// the question's, and the first and last day of the time asked about.
+fn known_dates(question: &str, scope: &Scope, sources: &[Source]) -> Vec<Date> {
+    let offset = crate::when::local_offset_min();
+    let mut known: Vec<Date> = dates_in(question).into_iter().map(|(_, d)| d).collect();
+    for s in sources {
+        known.push(ymd(s.at, offset));
+        known.extend(dates_in(&s.text).into_iter().map(|(_, d)| d));
+        known.extend(dates_in(&s.title).into_iter().map(|(_, d)| d));
+    }
+    if let Some(w) = &scope.window {
+        known.push(ymd(w.start, w.offset_min));
+        known.push(ymd((w.end - 1).max(w.start), w.offset_min));
+    }
+    known
+}
+
+/// The dates in `text` that agree with none of `known`, as written, each once.
+fn unsupported_dates(text: &str, known: &[Date]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for (written, d) in dates_in(text) {
+        if !known.iter().any(|k| k.agrees(&d)) && !out.contains(&written) {
+            out.push(written);
+        }
+    }
+    out
 }
 
 /// Who can answer a question, in order: the configured model, then each other coding
@@ -1356,6 +1486,58 @@ mod tests {
             project: "p".into(),
             code: None,
             text: String::new(),
+        }
+    }
+
+    #[test]
+    fn an_answer_may_only_give_dates_its_sources_show() {
+        let d = |y: Option<i64>, m, day| Date {
+            year: y,
+            month: m,
+            day,
+        };
+        // Sources dated 2 and 16 Oct 2026; one also names "5 Sep".
+        let known = vec![d(Some(2026), 10, 2), d(Some(2026), 10, 16), d(None, 9, 5)];
+        // What sonnet wrote on 17 Oct 2026: a year no source shows.
+        assert_eq!(
+            unsupported_dates("The agent stopped it on 2016-10-16.", &known),
+            vec!["2016-10-16"]
+        );
+        // The same dates written every way a model writes them agree.
+        for ok in [
+            "Stopped on 2026-10-16 after starting 2 Oct.",
+            "Stopped on 16 October 2026; it began on October 2.",
+            "It began Oct 2nd, 2026 and a test ran on 5 September.",
+            "Ran 14 days, 2.9% vs 3.8%, 5 memories, top 20.",
+        ] {
+            assert!(unsupported_dates(ok, &known).is_empty(), "{ok}");
+        }
+        // A day that is in no source, with or without a year.
+        assert_eq!(
+            unsupported_dates("It shipped on 9 October and again on 2026-10-03.", &known),
+            vec!["2026-10-03", "9 October"]
+        );
+        // Indonesian month names, and a word that only starts like a month is no date.
+        assert!(unsupported_dates("Dihentikan 16 okt.", &known).is_empty());
+        assert!(unsupported_dates("Found 3 junior bugs in 12 marching tests.", &known).is_empty());
+        assert!(unsupported_dates("There may 2 more.", &known).is_empty());
+        assert_eq!(unsupported_dates("Due May 2.", &known), vec!["May 2"]);
+    }
+
+    #[test]
+    fn known_dates_cover_sources_their_text_the_question_and_the_window() {
+        let mut s = src(Ref::Event(1));
+        s.at = 1_792_108_800_000; // 2026-10-16 UTC
+        s.text = "The trial started at 05:37 on 2026-10-02.".into();
+        let scope = Scope::default();
+        let known = known_dates("what happened on 9 October?", &scope, &[s]);
+        for (y, m, day) in [(2026, 10, 2), (2026, 10, 9)] {
+            let want = Date {
+                year: Some(y),
+                month: m,
+                day,
+            };
+            assert!(known.iter().any(|k| k.agrees(&want)), "{want:?}");
         }
     }
 
