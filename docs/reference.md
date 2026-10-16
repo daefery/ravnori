@@ -47,7 +47,7 @@ The first run downloads the embedding model (about 90 MB, once). Linux with glib
 or newer (Ubuntu 24.04, Debian 13, Fedora 40) gets the full build; glibc 2.35 to 2.38
 (Ubuntu 22.04, Debian 12) gets a lite build without ONNX Runtime, whose prebuilt library
 needs glibc 2.38: meaning search then uses the small potion model, everything else is the
-same. Intel Macs get the lite build too, since ONNX Runtime ships no library for them. Windows: use WSL. `RAVNORI_VERSION=v0.6.1`
+same. Intel Macs get the lite build too, since ONNX Runtime ships no library for them. Windows: use WSL. `RAVNORI_VERSION=v0.6.2`
 picks a release, `RAVNORI_BIN_DIR` another folder, `RAVNORI_NO_SETUP=1` installs only the
 binary. To build from source instead, see Build below.
 
