@@ -375,6 +375,24 @@ enum Cmd {
         #[arg(long)]
         strict: bool,
     },
+    /// Team memory (test phase): share this project's distilled memories with teammates
+    /// through its git remote (refs/ravnori/*), and add theirs here
+    Sync {
+        /// on: share the project checked out here; off: stop; status: list; now (default):
+        /// send and receive for every shared project
+        #[arg(value_parser = ["on", "off", "status", "now"], default_value = "now")]
+        action: String,
+        /// With `on`: also send the memories made before today (default: from now on)
+        #[arg(long)]
+        history: bool,
+        /// With `off`: the project (default: the one checked out here)
+        #[arg(long)]
+        project: Option<String>,
+        /// With `on`: keep the memories in this repository (a git URL, e.g. a private
+        /// memory repo for the team) instead of the project's own remote
+        #[arg(long)]
+        via: Option<String>,
+    },
     /// Full-text search over captured events
     Search {
         query: Vec<String>,
@@ -1505,6 +1523,86 @@ fn main() -> Result<()> {
             limit,
         } => {
             search::run(&conn, &query.join(" "), project.as_deref(), limit)?;
+        }
+        Cmd::Sync {
+            action,
+            history,
+            project,
+            via,
+        } => run_sync(&mut conn, &action, history, project, via)?,
+    }
+    Ok(())
+}
+
+/// `rvn sync`.
+fn run_sync(
+    conn: &mut rusqlite::Connection,
+    action: &str,
+    history: bool,
+    project: Option<String>,
+    via: Option<String>,
+) -> Result<()> {
+    use ravnori::sync;
+    let cwd = std::env::current_dir()?;
+    match action {
+        "on" => {
+            let (p, s) = sync::enable(conn, &cwd, history, via.as_deref())?;
+            let place = match &s.via {
+                Some(url) => format!("the memory repository {url}"),
+                None => format!("{}'s origin remote", s.root.display()),
+            };
+            println!(
+                "sharing {p} as {} through {place}; {}; run `rvn sync` to send and receive",
+                s.author,
+                if history {
+                    "its earlier memories go too"
+                } else {
+                    "memories from now on"
+                }
+            );
+        }
+        "off" => {
+            let p = match project {
+                Some(p) => p,
+                None => hook::project_for(conn, None, Some(&cwd.to_string_lossy()))
+                    .ok_or_else(|| anyhow::anyhow!("cannot resolve a project; pass --project"))?,
+            };
+            if sync::disable(conn, &p)? {
+                println!("stopped sharing {p}; memories already received stay");
+            } else {
+                println!("{p} was not shared");
+            }
+        }
+        "status" => {
+            let all = sync::projects(conn)?;
+            if all.is_empty() {
+                println!("no project is shared (run `rvn sync on` in a checkout)");
+            }
+            for (p, s) in all {
+                let got: i64 = conn.query_row(
+                    "SELECT count(*) FROM memories WHERE project = ?1 AND origin LIKE 'team:%'",
+                    [&p],
+                    |r| r.get(0),
+                )?;
+                println!(
+                    "{p}: as {} via {}, sent through memory #{}, {} teammate stream(s) read, {got} memories received",
+                    s.author,
+                    s.via.as_deref().unwrap_or("origin"),
+                    s.pushed,
+                    s.pulled.len()
+                );
+            }
+        }
+        _ => {
+            let t = Instant::now();
+            let reports = sync::run(conn)?;
+            if reports.is_empty() {
+                println!("no project is shared (run `rvn sync on` in a checkout)");
+            }
+            for r in reports {
+                println!("{r}");
+            }
+            println!("sync took {:.1}s", t.elapsed().as_secs_f64());
         }
     }
     Ok(())

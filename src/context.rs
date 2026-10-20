@@ -197,11 +197,13 @@ struct Obs {
     kind: String,
     title: String,
     at: i64,
+    /// " · from <teammate>" for a memory synced from a teammate, else empty.
+    from: String,
 }
 
 fn memories(conn: &Connection, project: &str, limit: usize) -> Result<(Vec<Obs>, Option<Summary>)> {
     let mut s = conn.prepare(&format!(
-        "SELECT id, coalesce(type, kind), coalesce(title, ''), coalesce(created_at, 0) FROM memories m
+        "SELECT id, coalesce(type, kind), coalesce(title, ''), coalesce(created_at, 0), origin FROM memories m
          WHERE project = ?1 AND kind = 'observation' AND coalesce(type, '') != 'sensitive' AND {}
          ORDER BY created_at DESC LIMIT ?2",
         crate::scripted::MEMORY_NOT_SCRIPTED
@@ -213,6 +215,7 @@ fn memories(conn: &Connection, project: &str, limit: usize) -> Result<(Vec<Obs>,
                 kind: r.get(1)?,
                 title: r.get(2)?,
                 at: r.get(3)?,
+                from: crate::sync::from_suffix(&r.get::<_, String>(4)?),
             })
         })?
         .collect::<rusqlite::Result<_>>()?;
@@ -304,10 +307,11 @@ fn render(
         for m in obs {
             writeln!(
                 w,
-                "#{} {} · {} ago · {}",
+                "#{} {} · {} ago{} · {}",
                 m.id,
                 m.kind,
                 ago(now - m.at),
+                m.from,
                 one_line(&m.title, 120)
             )?;
         }

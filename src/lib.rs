@@ -32,6 +32,7 @@ pub mod rerank;
 pub mod scripted;
 pub mod search;
 pub mod service;
+pub mod sync;
 pub mod text;
 pub mod trace;
 pub mod ui;

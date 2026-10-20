@@ -467,8 +467,9 @@ pub fn recall(
         }
         openings.push(opening);
         let line = format!(
-            "#{id} {kind} · {} ago · {}\n",
+            "#{id} {kind} · {} ago{} · {}\n",
             ago(now - at),
+            crate::sync::from_label(conn, id),
             text::head(&title, 110)
         );
         if w.len() + line.len() > MAX_CHARS {
