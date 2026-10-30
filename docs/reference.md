@@ -111,6 +111,11 @@ the session ended on one; the last summary; recent observations with ids; and a
 capture-health footer. On each prompt, if another session in the project did
 something since, a short "meanwhile" update.
 
+A run that keeps no transcript (`codex exec --ephemeral`, `pi --no-session`) is
+automation nobody reads along with: it gets only your pinned facts, no memories, and
+nothing it is shown is counted in `rvn uptake`. ravnori's tools still work there. A new
+Claude Code session whose transcript is not written yet is a normal session, not this.
+
 ## Configuration
 
 `~/.ravnori/config.json` (optional):
@@ -264,7 +269,8 @@ through apply_patch and asks to re-trust changed hooks, so it uses `recall_file`
 Evals say whether recalled memories would help; `rvn uptake` says what agents do with
 them. Every memory ravnori injects is recorded with its source (session start, prompt
 recall, file recall), every call to ravnori's MCP tools with the memories it asked for,
-and every hook run with its duration. The report shows, per source, how many offered
+and every hook run with its duration (pi's session-start context is recorded when it is
+delivered, with the first prompt). The report shows, per source, how many offered
 memories were fetched in full within a day in the same project or cited by id (`#123`)
 in the agent's replies, MCP calls per tool, and hook p50/p95. `rvn doctor` prints a
 one-line summary. Transcripts keep neither hook context nor MCP arguments, so counting

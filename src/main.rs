@@ -51,6 +51,9 @@ enum Cmd {
         session: Option<String>,
         #[arg(long, default_value_t = 8000)]
         budget: usize,
+        /// Only the pinned facts: for a run that keeps no transcript (pi --no-session)
+        #[arg(long)]
+        pins_only: bool,
     },
     /// Wire ravnori into Claude Code, Codex and pi (backs up every file it changes)
     Install {
@@ -112,6 +115,10 @@ enum Cmd {
         /// The user's prompt, for prompt-time recall
         #[arg(long)]
         prompt: Option<String>,
+        /// Memory ids of the session-start context delivered with this prompt, recorded as
+        /// offered for `rvn uptake` (the pi extension passes them once, when it delivers)
+        #[arg(long, value_delimiter = ',', hide = true)]
+        start_ids: Vec<i64>,
     },
     /// Call an MCP tool from the shell: rvn tool search '{"query":"..."}'
     Tool {
@@ -536,6 +543,7 @@ fn main() -> Result<()> {
             project,
             session,
             budget,
+            pins_only,
         } => {
             let cwd = cwd.or_else(|| {
                 std::env::current_dir()
@@ -545,6 +553,12 @@ fn main() -> Result<()> {
             let project = project
                 .or_else(|| hook::project_for(&conn, session.as_deref(), cwd.as_deref()))
                 .ok_or_else(|| anyhow::anyhow!("cannot resolve a project; pass --project"))?;
+            if pins_only {
+                if let Some(pins) = context::pins_only(&conn, &project)? {
+                    println!("{pins}");
+                }
+                return Ok(());
+            }
             let fresh = hook::catch_up_recent(&mut conn, std::time::Duration::from_millis(400))?;
             let ctx = context::build(
                 &conn,
@@ -1486,6 +1500,7 @@ fn main() -> Result<()> {
             session,
             cwd,
             prompt,
+            start_ids,
         } => {
             hook::catch_up_recent(&mut conn, std::time::Duration::from_millis(200))?;
             if let Some(project) = hook::project_for(&conn, Some(&session), cwd.as_deref())
@@ -1493,6 +1508,13 @@ fn main() -> Result<()> {
                     hook::prompt_update(&conn, &session, &project, prompt.as_deref())
             {
                 println!("{update}");
+            }
+            // Bookkeeping last, as in the hooks: it waits only briefly on a busy database
+            // and never costs the agent its update.
+            if !start_ids.is_empty()
+                && let Err(e) = hook::record_start(&mut conn, &session, &start_ids, false)
+            {
+                hook::log(&format!("delta start offers: {e:#}"));
             }
         }
         Cmd::Tool { name, args } => {

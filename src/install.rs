@@ -734,6 +734,9 @@ export default function (pi: ExtensionAPI) {
 	let touched = new Set<string>();
 	let startContext = "";
 	let delivered = false;
+	// pi --no-session keeps no session file: a scripted run. It gets the pinned facts (the
+	// user's standing rules) and no memories, as ravnori's hooks do for other agents.
+	let ephemeral = false;
 
 	const run = async (args: string[]) => {
 		try {
@@ -756,8 +759,11 @@ export default function (pi: ExtensionAPI) {
 		session = `pi:${ctx.sessionManager.getSessionId()}`;
 		touched.clear();
 		const file = ctx.sessionManager.getSessionFile();
+		ephemeral = !file;
 		if (file) await run(["ingest", file]);
-		startContext = await run(["context", "--cwd", ctx.cwd, "--session", session]);
+		startContext = ephemeral
+			? await run(["context", "--cwd", ctx.cwd, "--pins-only"])
+			: await run(["context", "--cwd", ctx.cwd, "--session", session]);
 		delivered = false;
 	});
 
@@ -767,13 +773,17 @@ export default function (pi: ExtensionAPI) {
 		const file = ctx.sessionManager.getSessionFile();
 		if (file) await run(["ingest", file]);
 		const parts: string[] = [];
+		// Memory ids in the start context, recorded as offered when it is delivered.
+		let startIds: string[] = [];
 		if (!delivered && startContext) {
 			delivered = true;
 			parts.push(startContext);
+			if (!ephemeral) startIds = [...startContext.matchAll(/^#(\d+) /gm)].map((m) => m[1]);
 		}
-		if (session) {
+		if (session && !ephemeral) {
 			const args = ["delta", "--session", session, "--cwd", ctx.cwd];
-			if (typeof event.prompt === "string" && event.prompt) args.push("--prompt", event.prompt);
+			if (event.messageType === "user" && event.prompt) args.push("--prompt", event.prompt);
+			if (startIds.length) args.push("--start-ids", startIds.join(","));
 			const update = await run(args);
 			if (update) parts.push(update);
 		}
@@ -786,7 +796,7 @@ export default function (pi: ExtensionAPI) {
 	// First read or change of a file in this session: past memories about it ride along
 	// with the tool's result, as Claude Code's file hook does.
 	pi.on("tool_result", async (event, ctx) => {
-		if (!session || event.isError) return;
+		if (!session || ephemeral || event.isError) return;
 		if (event.toolName !== "read" && event.toolName !== "edit" && event.toolName !== "write") return;
 		let path = (event.input as any)?.path;
 		if (typeof path !== "string" || !path) return;
@@ -811,7 +821,7 @@ export default function (pi: ExtensionAPI) {
 	// End of a turn: record the git working tree so the next session knows what is in progress.
 	pi.on("agent_end", async (_event, ctx) => {
 		// Not awaited: git on a big repo must never delay the next turn.
-		if (session) void run(["snapshot", "--session", session, "--cwd", ctx.cwd]);
+		if (session && !ephemeral) void run(["snapshot", "--session", session, "--cwd", ctx.cwd]);
 	});
 
 	const tool = (name: string, description: string, parameters: any, promptSnippet?: string) =>

@@ -28,6 +28,9 @@ pub struct Input {
     pub prompt: Option<String>,
     /// The file a tool read or changed (PostToolUse on Read, Edit, Write, ...).
     pub file: Option<String>,
+    /// The agent says it keeps no transcript: `transcript_path` is present and null, as
+    /// Codex sends for `codex exec --ephemeral`. A missing field is not this.
+    pub ephemeral: bool,
 }
 
 impl Input {
@@ -45,6 +48,7 @@ impl Input {
                 .iter()
                 .find_map(|k| v["tool_input"].get(k).and_then(Value::as_str))
                 .map(str::to_string),
+            ephemeral: v.get("transcript_path").is_some_and(Value::is_null),
         }
     }
 }
@@ -268,6 +272,18 @@ fn run_phases(conn: &mut Connection, agent: Agent, event: &str, phases: &mut Pha
     let input = Input::from_stdin();
     phases.mark("stdin");
     let session = input.session_id.as_deref().map(|s| session_key(agent, s));
+    // A run that keeps no transcript is scripted automation: nobody reads along, and
+    // nothing it does with a memory can be measured or built on. It gets the pinned facts
+    // (the user's standing rules) and no memories, records no offers, and starts nothing.
+    if input.ephemeral {
+        if event == "session-start"
+            && let Some(project) = project_for(conn, session.as_deref(), input.cwd.as_deref())
+            && let Some(pins) = context::pins_only(conn, &project)?
+        {
+            emit("SessionStart", &pins);
+        }
+        return Ok(());
+    }
     // A file touch comes after every read or edit: it stays quick and leaves catching up
     // with the transcript to the other hooks and the watcher.
     if event == "file" {
@@ -344,23 +360,8 @@ fn run_phases(conn: &mut Connection, agent: Agent, event: &str, phases: &mut Pha
             let notice = (!alerts.is_empty()).then(|| format!("ravnori: {}", alerts.join(" | ")));
             phases.mark("footer and health");
             emit_with("SessionStart", &ctx, notice.as_deref());
-            let _ = conn.busy_timeout(BOOKKEEPING_WAIT);
-            // The agent waits for this process to exit: both records in one write, so a
-            // busy database is waited for once, not once per record.
             if let Some(s) = &session
-                && let Err(e) = conn
-                    .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-                    .and_then(|tx| {
-                        if let Err(e) =
-                            crate::uptake::offered(&tx, s, &crate::uptake::ids_in(&ctx), "start")
-                        {
-                            log(&format!("uptake: {e:#}"));
-                        }
-                        if let Err(e) = set_watermark(&tx, s) {
-                            log(&format!("watermark: {e:#}"));
-                        }
-                        tx.commit()
-                    })
+                && let Err(e) = record_start(conn, s, &crate::uptake::ids_in(&ctx), true)
             {
                 log(&format!("session-start records: {e:#}"));
             }
@@ -491,6 +492,27 @@ fn emit_with(event: &str, ctx: &str, system_message: Option<&str>) {
         out["systemMessage"] = json!(m);
     }
     println!("{out}");
+}
+
+/// Record what a session was shown at its start: the memories offered (for `rvn uptake`)
+/// and, with `watermark`, where its cross-agent "meanwhile" updates begin. The agent
+/// waits for this process to exit, so it is one write: a busy database is waited for
+/// once, briefly, not once per record. A failed record is logged, never fatal.
+pub fn record_start(
+    conn: &mut Connection,
+    session: &str,
+    ids: &[i64],
+    watermark: bool,
+) -> rusqlite::Result<()> {
+    let _ = conn.busy_timeout(BOOKKEEPING_WAIT);
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    if let Err(e) = crate::uptake::offered(&tx, session, ids, "start") {
+        log(&format!("uptake: {e:#}"));
+    }
+    if watermark && let Err(e) = set_watermark(&tx, session) {
+        log(&format!("watermark: {e:#}"));
+    }
+    tx.commit()
 }
 
 fn set_watermark(conn: &Connection, session: &str) -> Result<()> {

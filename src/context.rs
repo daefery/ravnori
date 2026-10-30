@@ -63,6 +63,33 @@ pub fn build(conn: &Connection, o: &Options) -> Result<String> {
     }
 }
 
+/// Only the pinned facts, for a run that keeps no transcript: the user's standing rules
+/// still apply there, memories do not. None when nothing is pinned.
+pub fn pins_only(conn: &Connection, project: &str) -> Result<Option<String>> {
+    let pins = crate::forget::pinned(conn, project)?;
+    if pins.is_empty() {
+        return Ok(None);
+    }
+    let mut w = String::new();
+    writeln!(w, "# ravnori memory · {project}")?;
+    write_pins(&mut w, &pins)?;
+    Ok(Some(w))
+}
+
+fn write_pins(w: &mut String, pins: &[(i64, String)]) -> std::fmt::Result {
+    if pins.is_empty() {
+        return Ok(());
+    }
+    writeln!(
+        w,
+        "\n## Pinned (the user asked every agent to keep these in mind)"
+    )?;
+    for (id, fact) in pins {
+        writeln!(w, "- {} (#{id})", one_line(fact, 300))?;
+    }
+    Ok(())
+}
+
 /// id, agent, title, last event, human prompt count, first prompt
 type Candidate = (
     String,
@@ -248,15 +275,7 @@ fn render(
     let now = db::now_ms();
     let mut w = String::new();
     writeln!(w, "# ravnori memory · {}", o.project)?;
-    if !pins.is_empty() {
-        writeln!(
-            w,
-            "\n## Pinned (the user asked every agent to keep these in mind)"
-        )?;
-        for (id, fact) in pins {
-            writeln!(w, "- {} (#{id})", one_line(fact, 300))?;
-        }
-    }
+    write_pins(&mut w, pins)?;
     if let Some((agent, age, _root, desc)) = git {
         writeln!(
             w,
