@@ -136,7 +136,7 @@ meaning-based search.
 <details>
 <summary><b>Options and older systems</b></summary>
 
-- `RAVNORI_VERSION=v0.6.2` picks a release, `RAVNORI_BIN_DIR` another folder, and
+- `RAVNORI_VERSION=v0.6.3` picks a release, `RAVNORI_BIN_DIR` another folder, and
   `RAVNORI_NO_SETUP=1` installs only the binary.
 - Linux with glibc 2.35 to 2.38 (Ubuntu 22.04, Debian 12) and Intel Macs get a "lite"
   build: the same ravnori, with a smaller model for meaning-based search.
