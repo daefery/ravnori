@@ -39,6 +39,12 @@
           <polyline points="16 17 19 20 22 17"></polyline><line x1="19" y1="13" x2="19" y2="20"></line>
         </svg>
       </button>
+      <button class="settings-btn" id="usage-btn" title="Token usage per week">
+        <svg class="settings-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="4" y1="20" x2="20" y2="20"></line>
+          <rect x="5" y="11" width="3" height="6"></rect><rect x="10.5" y="6" width="3" height="11"></rect><rect x="16" y="9" width="3" height="8"></rect>
+        </svg>
+      </button>
       <button class="settings-btn" id="context-btn" title="Session-start context preview">
         <svg class="settings-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path>
@@ -81,6 +87,40 @@
         <div class="preview-column">
           <div class="preview-content"><pre id="context-text">Loading…</pre></div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="usage-modal" style="display:none">
+    <div class="context-settings-modal usage-modal" role="dialog" aria-labelledby="usage-title">
+      <div class="modal-header">
+        <h2 id="usage-title">Token usage</h2>
+        <div class="header-controls">
+          <label class="preview-selector">
+            Show
+            <select id="usage-metric">
+              <option value="io">Input + output</option>
+              <option value="cache_read">Cache read</option>
+              <option value="replies">Replies</option>
+            </select>
+          </label>
+          <label class="preview-selector">
+            Weeks
+            <select id="usage-weeks">
+              <option value="4">4</option>
+              <option value="8" selected>8</option>
+              <option value="12">12</option>
+            </select>
+          </label>
+          <button class="modal-close-btn" id="usage-close" title="Close">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div class="modal-body move-body usage-body" id="usage-body">
+        <p class="move-help" id="usage-status" role="status">Loading…</p>
       </div>
     </div>
   </div>

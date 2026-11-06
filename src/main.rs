@@ -1467,7 +1467,10 @@ fn main() -> Result<()> {
             let from = ravnori::usage::window_start(db::now_ms(), weeks, off);
             let rows = ravnori::usage::collect(&ingest::roots(), from, off);
             print!("{}", ravnori::usage::render(&rows, weeks.max(1)));
-            print!("{}", ravnori::usage::footer(&conn, from)?);
+            print!(
+                "{}",
+                ravnori::usage::footer(&ravnori::usage::notes(&conn, from)?)
+            );
         }
         Cmd::File {
             path,

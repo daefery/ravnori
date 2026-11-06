@@ -67,6 +67,15 @@
   --font-mono: "JetBrains Mono", "SF Mono", ui-monospace, "Cascadia Code", Menlo, Consolas, "Liberation Mono", monospace;
   --radius-card: 12px;
   --radius-ctl: 8px;
+  /* Chart series (token usage), mid-tone so each reads on the light and dark grounds. */
+  --series-1: #168F76;
+  --series-2: #D9822B;
+  --series-3: #5B7FD6;
+  --series-4: #8FC25E;
+  --series-5: #B5579A;
+  --series-6: #3BA7B8;
+  --series-7: #C2A23A;
+  --series-8: #8A9A96;
 }
 
 /* Dark: one set of values, for the explicit choice and for the system default. */
@@ -922,6 +931,44 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .preview-content::-webkit-scrollbar-track { background: transparent; }
 .preview-content::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.16); border-radius: 4px; }
 
+/* Token usage. */
+.usage-modal { max-width: 960px; height: auto; max-height: 90vh; }
+
+.usage-chart {
+  display: grid;
+  grid-auto-columns: minmax(0, 1fr);
+  grid-auto-flow: column;
+  align-items: end;
+  gap: 10px;
+  height: 220px;
+  padding-top: 4px;
+  border-bottom: 1px solid var(--line);
+}
+
+.usage-col { display: flex; flex-direction: column; align-items: stretch; justify-content: flex-end; height: 100%; min-width: 0; gap: 4px; }
+.usage-total { flex: none; font-size: 11.5px; font-weight: 600; color: var(--ink-2); text-align: center; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.usage-bar { display: flex; flex-direction: column-reverse; min-height: 1px; overflow: hidden; border-radius: 5px 5px 0 0; }
+.usage-seg { min-height: 1px; flex-basis: 0; }
+/* Every label the same height, pulled below the axis by that height plus the column
+   gap, so all bars end on the axis whether a label has one line or two. */
+.usage-week { flex: none; height: 30px; margin-bottom: -34px; font-size: 11.5px; line-height: 1.35; color: var(--ink-3); text-align: center; white-space: nowrap; }
+.usage-week small { display: block; font-size: 10.5px; color: var(--ink-4); }
+
+.usage-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 40px; font-size: 12.5px; color: var(--ink-2); }
+.usage-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.usage-legend i { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+
+.usage-table-wrap { overflow-x: auto; }
+.usage-table { width: 100%; border-collapse: collapse; font-size: 12.5px; color: var(--ink-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.usage-table th { padding: 6px 10px; border-bottom: 1px solid var(--line-strong); font-weight: 650; color: var(--ink); text-align: right; }
+.usage-table td { padding: 5px 10px; text-align: right; }
+.usage-table th:nth-child(-n+4), .usage-table td:nth-child(-n+4) { text-align: left; }
+.usage-table td:first-child { font-weight: 650; color: var(--ink); }
+.usage-table tr.usage-new-week td { border-top: 1px solid var(--line); }
+
+.usage-notes { max-width: 72ch; margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.55; color: var(--ink-2); }
+.usage-notes b { font-weight: 650; color: var(--ink); overflow-wrap: anywhere; }
+
 /* Backup & move. */
 .move-modal { max-width: 760px; height: auto; max-height: 90vh; }
 .move-body { overflow-y: auto; padding: 4px 24px 24px; gap: 0; }
@@ -1128,6 +1175,10 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   .preview-selector { gap: 6px; font-size: 11.5px; }
   .preview-selector select { font-size: 11.5px; }
   .preview-column { padding: 10px; }
+  .usage-modal .header-controls { flex-wrap: wrap; justify-content: flex-end; }
+  .usage-chart { gap: 4px; height: 180px; }
+  .usage-total { font-size: 10px; }
+  .usage-week { font-size: 10px; }
 }
 
 @media (max-width: 480px) {

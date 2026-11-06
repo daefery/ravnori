@@ -3,7 +3,8 @@
 Browser checks that every feature of the web viewer (`ui/`) still works: the feed and
 its paging, facts and narrative, summaries and their icons, agent badges, the health
 pill, the project filter, search with match labels, the theme, the session-start
-preview, the backup window, live updates, a phone-width layout and no console errors.
+preview, the backup window, the token usage window, live updates, a phone-width layout
+and no console errors.
 
 Run them after any change to `ui/`, from the repository root:
 

@@ -370,6 +370,97 @@
     }
   }
 
+  // ---------- token usage ----------
+
+  // Read from the agents' transcripts on each open (a few seconds for many weeks), so the
+  // last report is kept per week count and shown again when only the measure changes.
+  const usage = { data: null, weeks: null, seq: 0 };
+  const fmtTokens = (n) =>
+    n >= 1e9 ? `${(n / 1e9).toFixed(2)}B` : n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(n);
+  const usageValue = (r, metric) => (metric === "io" ? r.input + r.output : r[metric]);
+  const seriesName = (r) => `${r.agent} · ${r.route} · ${r.family}`;
+  const weekLabel = (iso) =>
+    new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+
+  async function showUsage() {
+    $("usage-modal").style.display = "flex";
+    const weeks = $("usage-weeks").value;
+    if (usage.data && usage.weeks === weeks) return renderUsage();
+    const seq = ++usage.seq;
+    $("usage-body").replaceChildren(el("p", { class: "move-help", id: "usage-status", role: "status" },
+      `Reading ${weeks} weeks of transcripts…`));
+    try {
+      const data = await getJSON(`/api/usage?weeks=${weeks}`);
+      if (seq !== usage.seq) return; // a newer request replaced this one
+      Object.assign(usage, { data, weeks });
+      renderUsage();
+    } catch (e) {
+      if (seq !== usage.seq) return;
+      $("usage-body").replaceChildren(el("p", { class: "move-help error", id: "usage-status" }, `Could not read usage: ${e.message}`));
+    }
+  }
+
+  function renderUsage() {
+    const { rows, accounts, own_calls, week_starts, this_week } = usage.data;
+    const metric = $("usage-metric").value;
+    const body = $("usage-body");
+    if (!rows.length) {
+      body.replaceChildren(el("p", { class: "move-help", id: "usage-status" }, "No replies with token counts in these weeks."));
+      return;
+    }
+    // Series by total, biggest first, so the colours stay with the routes that matter.
+    const totals = new Map();
+    for (const r of rows) totals.set(seriesName(r), (totals.get(seriesName(r)) || 0) + usageValue(r, metric));
+    const series = [...totals.entries()].filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]).map(([k]) => k);
+    const colour = new Map(series.map((s, i) => [s, `var(--series-${Math.min(i, 7) + 1})`]));
+    // Every week in the window, a week without replies too, so a gap shows as a gap.
+    const perWeek = week_starts.map((w) => {
+      const parts = new Map();
+      for (const r of rows) if (r.week === w) parts.set(seriesName(r), (parts.get(seriesName(r)) || 0) + usageValue(r, metric));
+      return { week: w, parts, total: [...parts.values()].reduce((a, b) => a + b, 0) };
+    });
+    const max = Math.max(1, ...perWeek.map((w) => w.total));
+    const label = { io: "Input + output tokens", cache_read: "Cache-read tokens", replies: "Replies" }[metric];
+
+    const chart = el("div", { class: "usage-chart", role: "img", "aria-label": `${label} per week` },
+      ...perWeek.map((w) => el("div", { class: "usage-col" },
+        el("span", { class: "usage-total" }, w.total ? fmtTokens(w.total) : ""),
+        el("div", { class: "usage-bar", style: `height:${(100 * w.total) / max}%` },
+          ...series.filter((s) => w.parts.get(s)).map((s) => el("div", {
+            class: "usage-seg",
+            style: `flex-grow:${w.parts.get(s)};background:${colour.get(s)}`,
+            title: `${s}: ${fmtTokens(w.parts.get(s))}`,
+          }))),
+        el("span", { class: "usage-week" }, weekLabel(w.week), w.week === this_week ? el("small", {}, "so far") : null))));
+    const legend = el("div", { class: "usage-legend" },
+      ...series.map((s) => el("span", {}, el("i", { style: `background:${colour.get(s)}` }), s)));
+
+    const head = ["Week of", "Agent", "Route", "Models", "Replies", "Input", "Output", "Cache read", "Cache write"];
+    const table = el("div", { class: "usage-table-wrap" }, el("table", { class: "usage-table" },
+      el("thead", {}, el("tr", {}, ...head.map((h) => el("th", {}, h)))),
+      el("tbody", {}, ...[...rows].reverse().map((r, i, all) => el("tr", { class: i && all[i - 1].week !== r.week ? "usage-new-week" : null },
+        el("td", {}, i && all[i - 1].week === r.week ? "" : weekLabel(r.week)),
+        el("td", {}, r.agent), el("td", {}, r.route), el("td", {}, r.family),
+        el("td", {}, fmtNum(r.replies)), el("td", {}, fmtTokens(r.input)), el("td", {}, fmtTokens(r.output)),
+        el("td", {}, fmtTokens(r.cache_read)), el("td", {}, fmtTokens(r.cache_write)))))));
+
+    const notes = el("ul", { class: "usage-notes" },
+      el("li", {}, "Input is input not read from a cache. How a subscription counts cached reads against its limit is not in these files."),
+      ...accounts.map((a) => el("li", {}, `Claude Code ${a.profile} is signed in to `, el("b", {}, a.account || "no account found"),
+        " now; a transcript does not say which account served it.")),
+      el("li", {}, own_calls.length
+        ? `ravnori’s own model calls (distillation, ask), not in the table: ${own_calls.map((c) => `${c.model} ${fmtNum(c.calls)}`).join(", ")}.`
+        : "ravnori made no model calls of its own in these weeks."));
+
+    body.replaceChildren(
+      el("section", { class: "move-section" },
+        el("h3", {}, `${label} per week`),
+        el("p", { class: "move-help" }, "Monday to Sunday, local time, from the Claude Code, Codex and pi transcripts on this machine. Each reply counts once."),
+        chart, legend),
+      el("section", { class: "move-section" }, el("h3", {}, "By agent and route"), table),
+      el("section", { class: "move-section" }, el("h3", {}, "Read with care"), notes));
+  }
+
   // ---------- wiring ----------
 
   // ---------- agents: which are not connected, and a button to connect them ----------
@@ -826,6 +917,13 @@
       if (e.target.id === "context-modal") e.target.style.display = "none";
     });
     $("context-project").addEventListener("change", (e) => showContext(e.target.value));
+    $("usage-btn").addEventListener("click", showUsage);
+    $("usage-close").addEventListener("click", () => ($("usage-modal").style.display = "none"));
+    $("usage-modal").addEventListener("click", (e) => {
+      if (e.target.id === "usage-modal") e.target.style.display = "none";
+    });
+    $("usage-weeks").addEventListener("change", showUsage);
+    $("usage-metric").addEventListener("change", () => usage.data && renderUsage());
     $("move-btn").addEventListener("click", showMove);
     $("move-close").addEventListener("click", () => ($("move-modal").style.display = "none"));
     $("move-modal").addEventListener("click", (e) => {
@@ -838,6 +936,7 @@
       if (e.key === "Escape") {
         $("context-modal").style.display = "none";
         $("move-modal").style.display = "none";
+        $("usage-modal").style.display = "none";
       }
       if (e.key === "/" && document.activeElement !== $("search")) {
         e.preventDefault();

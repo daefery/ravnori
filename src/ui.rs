@@ -397,6 +397,10 @@ fn route(path: &str, q: &HashMap<String, String>, db_path: &Path) -> Result<Resp
         "/api/projects" => Response::json(&projects(&open(db_path)?)?),
         "/api/stats" => Response::json(&stats(&open(db_path)?)?),
         "/api/agents" => Response::json(&json!({ "agents": crate::agents::status_all() })),
+        "/api/usage" => {
+            let weeks = q.get("weeks").and_then(|w| w.parse().ok()).unwrap_or(8);
+            Response::json(&crate::usage::report_json(&open(db_path)?, weeks)?)
+        }
         "/api/embed" => {
             let text = crate::text::head(
                 q.get("q").map(String::as_str).unwrap_or_default(),

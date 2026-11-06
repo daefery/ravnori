@@ -346,7 +346,7 @@ fn claude_account(profile: &Path) -> Option<String> {
 /// ravnori's own model calls since `from`, per model, busiest first.
 fn own_calls(conn: &Connection, from: i64) -> Result<Vec<(String, i64)>> {
     let mut st = conn.prepare(
-        "SELECT coalesce(model, '?'), sum(requests) FROM distill_calls WHERE at >= ?1
+        "SELECT coalesce(model, 'unknown model'), sum(requests) FROM distill_calls WHERE at >= ?1
           GROUP BY 1 ORDER BY 2 DESC",
     )?;
     let rows = st
@@ -419,33 +419,102 @@ pub fn render(rows: &BTreeMap<Bucket, Tokens>, weeks: i64) -> String {
     w
 }
 
-/// Notes that keep the table from being over-read: which account each Claude Code
-/// profile uses now, and ravnori's own model calls, which no transcript holds.
-pub fn footer(conn: &Connection, from: i64) -> Result<String> {
+/// What keeps the table from being over-read: which account each Claude Code profile is
+/// signed in to now (a transcript does not say which served it), and ravnori's own model
+/// calls, which no transcript holds.
+pub struct Notes {
+    /// (profile, account) for every Claude Code profile with transcripts.
+    pub accounts: Vec<(String, Option<String>)>,
+    /// (model, requests) since the window start, busiest first.
+    pub own_calls: Vec<(String, i64)>,
+}
+
+pub fn notes(conn: &Connection, from: i64) -> Result<Notes> {
+    let accounts = crate::ingest::claude_config_dirs()
+        .into_iter()
+        .filter(|p| p.join("projects").is_dir())
+        .map(|p| (tilde(&p), claude_account(&p)))
+        .collect();
+    Ok(Notes {
+        accounts,
+        own_calls: own_calls(conn, from)?,
+    })
+}
+
+pub fn footer(n: &Notes) -> String {
     let mut w = String::from(
         "\ninput = input not read from a cache. How a subscription counts cached reads against its\nlimit is not in these files.\n",
     );
-    for profile in crate::ingest::claude_config_dirs() {
-        if !profile.join("projects").is_dir() {
-            continue;
-        }
-        let who = claude_account(&profile).unwrap_or_else(|| "no account found".into());
+    for (profile, who) in &n.accounts {
         w.push_str(&format!(
-            "Claude Code {} is signed in to {who} now; a transcript does not say which account served it.\n",
-            tilde(&profile)
+            "Claude Code {profile} is signed in to {} now; a transcript does not say which account served it.\n",
+            who.as_deref().unwrap_or("no account found")
         ));
     }
-    let calls = own_calls(conn, from)?;
-    if calls.is_empty() {
+    if n.own_calls.is_empty() {
         w.push_str("ravnori made no model calls of its own in these weeks.\n");
     } else {
-        let list: Vec<String> = calls.iter().map(|(m, n)| format!("{m} {n}")).collect();
+        let list: Vec<String> = n
+            .own_calls
+            .iter()
+            .map(|(m, c)| format!("{m} {c}"))
+            .collect();
         w.push_str(&format!(
             "ravnori's own model calls (distillation, ask) in these weeks, not in the table: {}.\n",
             list.join(", ")
         ));
     }
-    Ok(w)
+    w
+}
+
+/// The same report for the viewer: one row per week, agent, route and model family,
+/// weeks as their Monday's date (YYYY-MM-DD). `week_starts` lists every week in the
+/// window, those without replies too, the last being `this_week`, which is not over.
+pub fn json(
+    rows: &BTreeMap<Bucket, Tokens>,
+    n: &Notes,
+    weeks: i64,
+    this_week: i64,
+) -> serde_json::Value {
+    let date = |day: i64| {
+        let (y, m, d) = crate::text::civil_from_days(day);
+        format!("{y:04}-{m:02}-{d:02}")
+    };
+    let starts: Vec<String> = (0..weeks).rev().map(|i| date(this_week - 7 * i)).collect();
+    serde_json::json!({
+        "weeks": weeks,
+        "week_starts": starts,
+        "this_week": date(this_week),
+        "rows": rows.iter().map(|(b, t)| serde_json::json!({
+            "week": date(b.week),
+            "agent": b.agent,
+            "route": b.route,
+            "family": b.family,
+            "replies": t.replies,
+            "input": t.input,
+            "output": t.output,
+            "cache_read": t.cache_read,
+            "cache_write": t.cache_write,
+        })).collect::<Vec<_>>(),
+        "accounts": n.accounts.iter().map(|(profile, account)| serde_json::json!({
+            "profile": profile,
+            "account": account,
+        })).collect::<Vec<_>>(),
+        "own_calls": n.own_calls.iter().map(|(model, calls)| serde_json::json!({
+            "model": model,
+            "calls": calls,
+        })).collect::<Vec<_>>(),
+    })
+}
+
+/// The last `weeks` weeks to now, on this machine's transcripts, in its local time.
+pub fn report_json(conn: &Connection, weeks: i64) -> Result<serde_json::Value> {
+    let weeks = weeks.clamp(1, 52);
+    let off = crate::when::local_offset_min();
+    let now = crate::db::now_ms();
+    let from = window_start(now, weeks, off);
+    let rows = collect(&crate::ingest::roots(), from, off);
+    Ok(json(&rows, &notes(conn, from)?, weeks, monday(now, off)))
 }
 
 #[cfg(test)]
@@ -463,6 +532,39 @@ mod tests {
         let sun = crate::text::parse_ts("2026-11-08T16:59:59Z").unwrap();
         assert_eq!(monday(sun, WIB), monday(mon, WIB));
         assert_eq!(window_start(sun, 1, WIB), mon - 30 * 60_000);
+    }
+
+    #[test]
+    fn the_viewer_gets_every_week_in_the_window() {
+        let this = monday(crate::text::parse_ts("2026-11-04T05:00:00Z").unwrap(), WIB);
+        let notes = Notes {
+            accounts: vec![("~/.claude".into(), None)],
+            own_calls: vec![],
+        };
+        let mut rows = BTreeMap::new();
+        rows.insert(
+            Bucket {
+                week: this - 14,
+                agent: "pi",
+                route: "cliproxyapi:developer".into(),
+                family: "claude",
+            },
+            Tokens {
+                replies: 2,
+                input: 5,
+                ..Default::default()
+            },
+        );
+        let v = json(&rows, &notes, 3, this);
+        // A week without replies is still a week.
+        assert_eq!(
+            v["week_starts"],
+            serde_json::json!(["2026-10-19", "2026-10-26", "2026-11-02"])
+        );
+        assert_eq!(v["this_week"], "2026-11-02");
+        assert_eq!(v["rows"][0]["week"], "2026-10-19");
+        assert_eq!(v["rows"][0]["input"], 5);
+        assert_eq!(v["accounts"][0]["account"], serde_json::Value::Null);
     }
 
     #[test]

@@ -168,6 +168,17 @@ const text = (es) => es.map((e) => e.textContent.replace(/\s+/g, " ").trim());
   await page.click("#move-close");
   ok(!(await page.isVisible("#move-modal")), "backup modal closes");
 
+  // Token usage window: one bar per week in the window (an empty record has none to
+  // stack, and then says so), the notes, and Escape closes it.
+  await page.click("#usage-btn");
+  await page.waitForFunction(() => !/^(Loading|Reading)/.test(document.getElementById("usage-body").textContent), null, { timeout: 60000 });
+  const cols = await page.$$("#usage-body .usage-col");
+  const usageText = await page.textContent("#usage-body");
+  ok(cols.length === 8 || usageText.includes("No replies with token counts"), `usage window shows 8 weeks or says there is nothing (${cols.length})`);
+  ok(cols.length === 0 || (await page.$$("#usage-body .usage-notes li")).length >= 2, "usage window carries its notes");
+  await page.keyboard.press("Escape");
+  ok(!(await page.isVisible("#usage-modal")), "Escape closes usage window");
+
   // Live updates: the newest-item poll adds new items at the top.
   const pollSeen = [];
   page.on("request", (r) => r.url().includes("after=") && pollSeen.push(r.url()));
