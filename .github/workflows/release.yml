@@ -38,7 +38,7 @@ jobs:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.target }}${{ matrix.suffix }}
+          key: ${{ matrix.os }}-${{ matrix.target }}${{ matrix.suffix }}
       - name: Build
         run: cargo build --release --locked --target ${{ matrix.target }} --features "${{ matrix.features }}"
       # Tests run where the binary can run: every target but the Intel one, which the

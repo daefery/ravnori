@@ -21,7 +21,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+      # The runner image is part of the key: a cache built on another image keeps
+      # build-script outputs (toolchain paths) that do not exist on this one.
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.os }}
       - run: cargo fmt --check
       - run: cargo clippy --locked --all-targets --features fastembed -- -D warnings
       - run: cargo test --locked --release --features fastembed
