@@ -738,9 +738,31 @@ mod chain_tests {
         std::thread::spawn(move || {
             use std::io::{Read, Write};
             for mut s in listener.incoming().flatten() {
+                // Read the whole request before answering: closing on a client still
+                // sending resets the connection (macOS 15 then fails the call with
+                // EINVAL instead of reading the 503).
+                let mut req = Vec::new();
                 let mut buf = [0u8; 8192];
-                let n = s.read(&mut buf).unwrap_or(0);
-                if String::from_utf8_lossy(&buf[..n]).contains("chat/completions") {
+                loop {
+                    let n = s.read(&mut buf).unwrap_or(0);
+                    req.extend_from_slice(&buf[..n]);
+                    let text = String::from_utf8_lossy(&req);
+                    let complete = text.find("\r\n\r\n").is_some_and(|end| {
+                        let len = text[..end]
+                            .lines()
+                            .find_map(|l| {
+                                let (k, v) = l.split_once(':')?;
+                                k.eq_ignore_ascii_case("content-length")
+                                    .then(|| v.trim().parse::<usize>().ok())?
+                            })
+                            .unwrap_or(0);
+                        req.len() >= end + 4 + len
+                    });
+                    if n == 0 || complete {
+                        break;
+                    }
+                }
+                if String::from_utf8_lossy(&req).contains("chat/completions") {
                     seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 }
                 let _ = s.write_all(
