@@ -27,9 +27,9 @@ jobs:
           # ONNX Runtime, so meaning search uses the small potion model.
           - { target: x86_64-unknown-linux-gnu, os: ubuntu-22.04, features: "", suffix: "-lite" }
           - { target: aarch64-unknown-linux-gnu, os: ubuntu-22.04-arm, features: "", suffix: "-lite" }
-          - { target: aarch64-apple-darwin, os: macos-14, features: fastembed, suffix: "" }
+          - { target: aarch64-apple-darwin, os: macos-15, features: fastembed, suffix: "" }
           # ONNX Runtime ships no prebuilt library for Intel Macs: the lite build.
-          - { target: x86_64-apple-darwin, os: macos-14, features: "", suffix: "" }
+          - { target: x86_64-apple-darwin, os: macos-15, features: "", suffix: "" }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4

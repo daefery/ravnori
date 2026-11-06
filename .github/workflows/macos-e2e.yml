@@ -19,9 +19,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14 # Apple Silicon, full build (what install.sh gives M-series Macs)
+          - os: macos-15 # Apple Silicon, full build (what install.sh gives M-series Macs)
             features: --features fastembed
-          - os: macos-14 # Apple Silicon, lite build (the build Intel Macs get)
+          - os: macos-15 # Apple Silicon, lite build (the build Intel Macs get)
             features: ""
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
