@@ -37,6 +37,7 @@ pub mod text;
 pub mod trace;
 pub mod ui;
 pub mod uptake;
+pub mod usage;
 pub mod when;
 
 /// A scratch directory for a test, removed when it is dropped (also when the test fails,

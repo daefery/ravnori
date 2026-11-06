@@ -80,6 +80,12 @@ enum Cmd {
         #[arg(long, default_value_t = 7)]
         days: i64,
     },
+    /// Tokens per week by agent, route (Claude Code profile, pi provider/account) and model,
+    /// from the agents' own transcripts
+    Usage {
+        #[arg(long, default_value_t = 8)]
+        weeks: i64,
+    },
     /// Memories about a file, and whether the file changed since each
     File {
         path: String,
@@ -1455,6 +1461,13 @@ fn main() -> Result<()> {
                 "{}",
                 ravnori::uptake::render(&ravnori::uptake::report(&conn, days)?, days)
             );
+        }
+        Cmd::Usage { weeks } => {
+            let off = ravnori::when::local_offset_min();
+            let from = ravnori::usage::window_start(db::now_ms(), weeks, off);
+            let rows = ravnori::usage::collect(&ingest::roots(), from, off);
+            print!("{}", ravnori::usage::render(&rows, weeks.max(1)));
+            print!("{}", ravnori::usage::footer(&conn, from)?);
         }
         Cmd::File {
             path,
