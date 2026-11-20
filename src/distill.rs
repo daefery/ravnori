@@ -474,6 +474,16 @@ impl Llm {
         )
     }
 
+    /// Completion requests sent so far, fallbacks included.
+    pub(crate) fn sent(&self) -> usize {
+        self.requests.get()
+    }
+
+    /// Send no request once `sent()` reaches `limit` (None: no limit).
+    pub(crate) fn limit_to(&self, limit: Option<usize>) {
+        self.request_limit.set(limit);
+    }
+
     pub fn load_cooldowns(&self, conn: &Connection) {
         let saved: Option<String> = conn
             .query_row(
@@ -1252,7 +1262,7 @@ pub fn requests_last_day(conn: &Connection) -> Result<usize> {
     )? as usize)
 }
 
-fn record_call(
+pub(crate) fn record_call(
     conn: &Connection,
     source: &str,
     model: Option<&str>,
@@ -1658,14 +1668,19 @@ pub(crate) fn store(
 /// One distiller per database across hooks and the watcher, held with an OS file lock
 /// next to it (for the live database, the data directory). The OS drops it when the
 /// process ends, so a long run is never mistaken for a stale one and a crashed one never
-/// blocks the next.
-struct Lock(#[allow(dead_code)] std::fs::File);
+/// blocks the next. Other background model work takes its own lock by name
+/// (`acquire_named`), so it never waits on distillation or holds it up.
+pub(crate) struct Lock(#[allow(dead_code)] std::fs::File);
 
 /// How long a held distill lock is retried before another distill is assumed running.
 const LOCK_SETTLE: std::time::Duration = std::time::Duration::from_millis(200);
 
 impl Lock {
     fn acquire(conn: &Connection) -> Result<Option<Lock>> {
+        Self::acquire_named(conn, "distill.lock")
+    }
+
+    pub(crate) fn acquire_named(conn: &Connection, name: &str) -> Result<Option<Lock>> {
         let dir = conn
             .path()
             .filter(|p| !p.is_empty())
@@ -1675,7 +1690,7 @@ impl Lock {
             .write(true)
             .create(true)
             .truncate(false)
-            .open(dir.join("distill.lock"))?;
+            .open(dir.join(name))?;
         // A lock just released can look held for a moment: a subprocess started by any
         // thread (git, the model client) holds a copy of every open file between its
         // fork and exec, the lock's included. Only a lock still held after a short wait

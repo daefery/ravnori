@@ -841,7 +841,14 @@ pub fn run(
             mode,
         )?;
         times.push(t.elapsed().as_secs_f64() * 1000.0);
-        let targets: Vec<i64> = c.id.into_iter().chain(c.ids.iter().copied()).collect();
+        // A target a newer memory replaced is answered by that newer memory, which recall
+        // shows in its place.
+        let mut targets: Vec<i64> = c.id.into_iter().chain(c.ids.iter().copied()).collect();
+        for t in targets.clone() {
+            if let Some(newer) = crate::supersede::latest(conn, t, c.before)? {
+                targets.push(newer);
+            }
+        }
         if c.open {
             if let Some(out) = dump.as_mut() {
                 let cands: Vec<i64> = ranked.iter().take(10).map(|r| r.0).collect();

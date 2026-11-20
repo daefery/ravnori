@@ -166,6 +166,19 @@ enum Cmd {
         #[arg(long, hide = true)]
         background: bool,
     },
+    /// Find which older memories new ones made outdated (the watcher does this in the
+    /// background); recall then shows the newer memory instead
+    Supersede {
+        /// Memories written in the last N days
+        #[arg(long, default_value_t = 30)]
+        since_days: i64,
+        /// Stop after this many model calls
+        #[arg(long)]
+        max_calls: Option<usize>,
+        /// Count the calls it would make, without calling the model
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Keep capture and distillation current in the background (runs as a user service)
     Watch {
         /// Seconds between transcript reconciliations
@@ -1313,6 +1326,20 @@ fn main() -> Result<()> {
                         distill::watch_pass(&mut conn);
                     }
                 });
+                // New memories compared with the older ones they may replace, once they
+                // have vectors (the capture loop embeds them). Its own thread, connection
+                // and lock: its model calls never hold up distillation.
+                let supersede_path = path.clone();
+                std::thread::spawn(move || {
+                    let pause = std::time::Duration::from_secs(distill_every);
+                    loop {
+                        std::thread::sleep(pause);
+                        match db::open(&supersede_path) {
+                            Ok(mut c) => ravnori::supersede::watch_pass(&mut c),
+                            Err(e) => hook::log(&format!("watch supersede: {e:#}")),
+                        }
+                    }
+                });
             }
             loop {
                 let sources = ingest::discover();
@@ -1358,6 +1385,35 @@ fn main() -> Result<()> {
                     }
                 }
                 std::thread::sleep(std::time::Duration::from_secs(interval.max(5)));
+            }
+        }
+        Cmd::Supersede {
+            since_days,
+            max_calls,
+            dry_run,
+        } => {
+            let s = ravnori::supersede::run(
+                &mut conn,
+                &ravnori::supersede::Options {
+                    since_days,
+                    max_calls,
+                    budget: None,
+                    dry_run,
+                },
+            )?;
+            if dry_run {
+                println!(
+                    "supersede (dry run): {} memories need a model call; {} have no older memory close enough",
+                    s.would_call, s.nothing_close
+                );
+            } else {
+                println!(
+                    "supersede: {} memories checked, {} model calls, {} older memories found replaced",
+                    s.checked, s.calls, s.links
+                );
+            }
+            for e in &s.errors {
+                eprintln!("  {e}");
             }
         }
         Cmd::Distill {

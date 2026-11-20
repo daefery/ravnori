@@ -250,6 +250,32 @@ CREATE TABLE IF NOT EXISTS hook_runs(
 );
 CREATE INDEX IF NOT EXISTS hook_runs_at ON hook_runs(at);
 
+-- A newer memory that makes an older one outdated on the same point, or says the same
+-- again, as the distillation model judged it (`supersede`). Nothing is changed or
+-- deleted: automatic recall shows the newer memory instead of the older one, search and
+-- get_observations show both, linked.
+CREATE TABLE IF NOT EXISTS supersedes(
+  old_id INTEGER NOT NULL,
+  new_id INTEGER NOT NULL,
+  relation TEXT NOT NULL DEFAULT 'supersedes', -- supersedes | duplicate
+  reason TEXT,
+  model TEXT,
+  at INTEGER NOT NULL,
+  PRIMARY KEY(old_id, new_id)
+);
+CREATE INDEX IF NOT EXISTS supersedes_new ON supersedes(new_id);
+-- Memories already compared with the older ones before them, whatever was found.
+CREATE TABLE IF NOT EXISTS supersede_checked(
+  memory_id INTEGER PRIMARY KEY,
+  candidates INTEGER NOT NULL,
+  at INTEGER NOT NULL
+);
+-- A link goes with either of its memories (memory ids can be reused after a delete).
+CREATE TRIGGER IF NOT EXISTS memories_supersede_ad AFTER DELETE ON memories BEGIN
+  DELETE FROM supersedes WHERE old_id = old.id OR new_id = old.id;
+  DELETE FROM supersede_checked WHERE memory_id = old.id;
+END;
+
 -- Every digest sent to the model chain, for the watcher's daily budget and doctor.
 CREATE TABLE IF NOT EXISTS distill_calls(
   at INTEGER NOT NULL,
@@ -334,7 +360,7 @@ pub fn home() -> PathBuf {
 
 /// Bump whenever SCHEMA or `migrate` changes; an up-to-date database then opens
 /// without taking a write lock.
-pub const SCHEMA_VERSION: i64 = 24;
+pub const SCHEMA_VERSION: i64 = 25;
 
 pub fn open(path: &Path) -> Result<Connection> {
     open_with(path, Duration::from_secs(5))

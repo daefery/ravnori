@@ -666,10 +666,14 @@ fn memory_line(conn: &Connection, id: i64) -> Result<(i64, String)> {
     } else {
         ty
     };
+    let replaced = crate::supersede::replaced_by(conn, id)?
+        .first()
+        .map(|n| format!(" · {} #{} ({})", n.verb(), n.id, day(n.at)))
+        .unwrap_or_default();
     Ok((
         at,
         format!(
-            "#{id} [{label}] {} · {} · {}{}",
+            "#{id} [{label}] {} · {} · {}{}{replaced}",
             day(at),
             short(&project),
             text::head(&title, 140),
@@ -987,6 +991,37 @@ fn memory_detail(conn: &Connection, id: i64) -> Result<String> {
     );
     if !subtitle.is_empty() {
         w.push_str(&format!("{subtitle}\n"));
+    }
+    // A newer memory that made this one outdated comes first: read it before relying on
+    // this one.
+    for n in crate::supersede::replaced_by(conn, id)? {
+        let verb = n.verb();
+        w.push_str(&format!(
+            "{}{} #{} ({}): {}{}\n",
+            verb[..1].to_uppercase(),
+            &verb[1..],
+            n.id,
+            day(n.at),
+            text::head(&n.title, 140),
+            if n.reason.is_empty() {
+                String::new()
+            } else {
+                format!(" (why: {})", n.reason)
+            }
+        ));
+    }
+    for o in crate::supersede::replaces(conn, id)? {
+        w.push_str(&format!(
+            "{} #{} ({}): {}\n",
+            if o.relation == "duplicate" {
+                "Repeats"
+            } else {
+                "Replaces"
+            },
+            o.id,
+            day(o.at),
+            text::head(&o.title, 140)
+        ));
     }
     if !narrative.is_empty() {
         w.push_str(&format!("\n{narrative}\n"));

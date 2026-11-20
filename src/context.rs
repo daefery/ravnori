@@ -232,8 +232,11 @@ fn memories(conn: &Connection, project: &str, limit: usize) -> Result<(Vec<Obs>,
     let mut s = conn.prepare(&format!(
         "SELECT id, coalesce(type, kind), coalesce(title, ''), coalesce(created_at, 0), origin FROM memories m
          WHERE project = ?1 AND kind = 'observation' AND coalesce(type, '') != 'sensitive' AND {}
+           -- One a newer memory made outdated is left out; the newer one is listed.
+           AND {}
          ORDER BY created_at DESC LIMIT ?2",
-        crate::scripted::MEMORY_NOT_SCRIPTED
+        crate::scripted::MEMORY_NOT_SCRIPTED,
+        crate::supersede::not_replaced(None)
     ))?;
     let obs = s
         .query_map(params![project, limit as i64], |r| {

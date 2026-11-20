@@ -45,7 +45,9 @@ when a source states it; never infer one from a later suggestion, follow-up or n
 reason it is: when the developer only accepted an option (their "asked:" line is a short go-ahead such
 as "ok let's do X", "B", "go"), the reason was the agent's recommendation, so say "the agent
 recommended it because ...; you chose it", not "we chose it because ...". A later message from the
-developer saying it is still open or undecided outweighs an earlier memory that calls it decided. Give times
+developer saying it is still open or undecided outweighs an earlier memory that calls it decided. A memory
+marked "replaced by #N" was made outdated by #N, and one "repeated in #N" is said again by #N: answer from
+the newer one, never state the older one as current. Give times
 as dates (each source shows its date), never only a clock time or "earlier": when something started,
 was decided or shipped, say on which date. A source marked "pinned by you" is the developer's own
 standing rule or fact: say it is their rule and since when. Keep each source's own
@@ -984,6 +986,16 @@ fn memory_sources(conn: &Connection, ids: &[i64]) -> Result<Vec<Source>> {
             })
             .optional()?;
         if let Some((kind, title, at, project, mut text)) = row {
+            // Said in the data: a newer memory corrected this one.
+            for n in crate::supersede::replaced_by(conn, id)?.iter().take(2) {
+                text.push_str(&format!(
+                    " | {} #{} ({}): {}",
+                    n.verb(),
+                    n.id,
+                    day(n.at),
+                    crate::text::head(&n.title, 120)
+                ));
+            }
             let prompts: Vec<String> = asked
                 .query_map([id], |x| x.get::<_, Option<String>>(0))?
                 .filter_map(|x| x.ok().flatten())

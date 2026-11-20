@@ -95,6 +95,7 @@ attached to the release.
 | `rvn ui [--port 37777]` | Web viewer: live feed of observations, summaries and prompts across agents, search, context preview, token usage per week (local only) |
 | `rvn watch` | Background reconciliation + distillation; also serves the viewer on :37777 |
 | `rvn distill` / `rvn models` | Tier-1 distillation through the model chain / show the chain and cooldowns |
+| `rvn supersede [--since-days 30] [--max-calls N] [--dry-run]` | Find which older memories new ones made outdated or repeated (the watcher does it in the background); recall then shows the newer one. See [Replaced memories](#replaced-memories) |
 | `rvn embed` | Download the local embedding model (Model2Vec, 30 MB) and embed memories for semantic recall |
 | `rvn mcp` | MCP server: `search`, `timeline`, `get_observations`, `recall_file`, `remember`, `ask`, `session_start_context` |
 | `rvn ask <question> [--project P \| --all] [--since D --until D] [--as-of T] [--sources]` | Ask about past agent work, answered from the record by your distillation model, or, when none is set up or it fails, by the Claude Code or Codex you are signed in to: memories, your pinned facts, your prompts and agents' replies, citing only sources it was shown (`#id` memories, `E<id>` events), each memory with whether its code is still there. A question about a time ("yesterday", "last week", "on 4 October", "kemarin") is read in your local time and looks in every project unless one is named; others look in this directory's project and never widen on their own. `--since/--until` set the time, `--as-of` replays a past question with only what existed then, `--sources` lists sources without a model |
@@ -226,6 +227,40 @@ Claude Code session whose transcript is not written yet is a normal session, not
   distil leaves the backlog after a day idle and is read again if it resumes.
   `rvn doctor` shows the backlog; a warning appears when sessions are about to leave
   the window and backfill will not reach them.
+- `distill.supersede_calls` (default 200; 0 = off) / `recall.hide_replaced` (default
+  true): see [Replaced memories](#replaced-memories).
+
+## Replaced memories
+
+Memories are added, never edited, so a corrected finding, a reversed decision or a fixed
+bug leaves the older memory beside the newer one. On 30 days of real use (20 Nov 2026),
+a third of the memories offered to agents (38 of 115 sampled, 95% interval 25-42%) had
+already been made outdated by a newer memory, as two models from different families
+judged it; for prompt recall, half (31 of 61).
+
+The watcher compares each new observation with the older observations of its project
+closest in meaning (at most five, cosine 0.55 or more, from the 30 days before it) and
+asks the distillation model, in one call per new memory, which of them it makes outdated
+or says again. Similarity alone cannot decide it: among close pairs only 15-28% were
+replacements, most add detail to a memory that stays true. These calls have their own
+limit, `distill.supersede_calls` a day (default 200), so memories are never made later
+because of them; newest memories are checked first, back 30 days. `rvn supersede`
+runs it by hand (`--dry-run` counts the calls first).
+
+Nothing is changed or deleted, and a wrong call costs little:
+
+- Prompt recall shows the newest memory in place of one it replaced or repeated, in that
+  rank; when the session already has the newer one, neither is shown again.
+- The session start leaves replaced memories out of its list.
+- Search lists both, the older marked `replaced by #new (date)`; get_observations shows
+  the newer one and the model's reason first; `rvn ask` is told, and answers from the
+  newer one.
+- `recall.hide_replaced: false` shows both everywhere, as before.
+
+`rvn doctor` shows how many memories were replaced and how many of the last 30 days are
+not checked yet. Two models judging each link alone, on 35 links made from the newest
+memories, confirmed 28 (both: 19); the other 7 were later steps of the same work (a new
+blocker after the old one) that the model read as replacing it.
 
 ## Memories about a file
 

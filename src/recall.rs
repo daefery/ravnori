@@ -115,8 +115,63 @@ impl<'a> Scope<'a> {
 }
 
 /// Rank memories for a prompt by keywords, by meaning, or both fused (reciprocal rank
-/// fusion). Without an embedder every mode is keyword ranking.
+/// fusion), each replaced memory swapped for the newer one that replaced it (see
+/// `with_replacements`). Without an embedder every mode is keyword ranking.
 pub fn rank(
+    conn: &Connection,
+    project: &str,
+    prompt: &str,
+    scope: &Scope,
+    limit: usize,
+    query: Option<&crate::embed::Query>,
+    mode: Mode,
+) -> Result<Vec<Hit>> {
+    let found = rank_matches(conn, project, prompt, scope, limit, query, mode)?;
+    with_replacements(conn, scope, found)
+}
+
+/// Each memory replaced by a newer one on the same point (`supersede`) gives its place to
+/// the newest memory that replaced it, in its rank: the prompt matched the older wording,
+/// the newer memory is what is true now. One the session already has (written in it, or
+/// shown to it before) is not shown again, and neither is the older one. Each memory
+/// keeps its first place.
+pub fn with_replacements(conn: &Connection, scope: &Scope, rows: Vec<Hit>) -> Result<Vec<Hit>> {
+    if !crate::supersede::enabled() {
+        return Ok(rows);
+    }
+    let mut info = conn.prepare_cached(
+        "SELECT coalesce(m.type, m.kind), coalesce(m.title, ''), coalesce(m.created_at, 0),
+                coalesce(m.session_id, '') = ?2
+                  OR EXISTS (SELECT 1 FROM recall_seen r WHERE r.session_id = ?3 AND r.memory_id = m.id)
+           FROM memories m WHERE m.id = ?1",
+    )?;
+    let mut out: Vec<Hit> = Vec::with_capacity(rows.len());
+    for hit in rows {
+        let hit = match crate::supersede::latest(conn, hit.0, scope.before)? {
+            None => hit,
+            Some(newer) => {
+                let (kind, title, at, has): (String, String, i64, bool) = info.query_row(
+                    params![
+                        newer,
+                        scope.session.unwrap_or("\u{0}"),
+                        scope.offered_to.unwrap_or("")
+                    ],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+                )?;
+                if has {
+                    continue;
+                }
+                (newer, kind, title, at)
+            }
+        };
+        if !out.iter().any(|x| x.0 == hit.0) {
+            out.push(hit);
+        }
+    }
+    Ok(out)
+}
+
+fn rank_matches(
     conn: &Connection,
     project: &str,
     prompt: &str,
@@ -449,6 +504,7 @@ pub fn recall(
         rows.truncate(TOP);
         fill_with_vectors(conn, &q, project, &scope, &mut rows, TOP)?;
     }
+    let mut rows = with_replacements(conn, &scope, rows)?;
     rows.truncate(top);
     if rows.is_empty() {
         return Ok(None);

@@ -63,6 +63,10 @@ pub struct RecallConfig {
     /// most this many memories per prompt; the other half keep the usual five. Unset: no
     /// trial, every session gets five.
     pub trial_top: Option<usize>,
+    /// When a newer memory replaced an older one on the same point (`supersede`), prompt
+    /// recall shows the newer one instead and the session start leaves the older one out.
+    /// Default true; false shows both, as before (search always shows both).
+    pub hide_replaced: Option<bool>,
 }
 
 /// Background distillation through any OpenAI-compatible endpoint.
@@ -96,6 +100,10 @@ pub struct DistillConfig {
     /// watcher, backfill). Default 300 (`rvn install` sets 100 for a sign-in); 0 turns
     /// backfill off and leaves the rest unlimited. A manual `rvn distill` is not limited.
     pub daily_calls: Option<usize>,
+    /// At most this many requests per 24 hours for finding which older memories a new one
+    /// replaced (`supersede`), counted apart from `daily_calls`. Default 200; 0 turns the
+    /// check off.
+    pub supersede_calls: Option<usize>,
     /// Never use models from these providers (the endpoint's `owned_by`, e.g. "antigravity").
     #[serde(default)]
     pub exclude_providers: Vec<String>,

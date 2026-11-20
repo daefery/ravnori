@@ -506,6 +506,41 @@ fn apply(here: &Connection, theirs: &Connection, f: &Full) -> Result<()> {
         }
     }
 
+    // Which of their memories replaced which, both ends remapped (the staged backup is
+    // migrated, so the table is there even from an older ravnori). Each merged memory
+    // counts as checked here, so the watcher never spends a call comparing it again.
+    {
+        let mut st =
+            theirs.prepare("SELECT old_id, new_id, relation, reason, model, at FROM supersedes")?;
+        let mut ins = here.prepare(
+            "INSERT OR IGNORE INTO supersedes(old_id, new_id, relation, reason, model, at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        )?;
+        let rows = st.query_map([], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, Option<String>>(3)?,
+                r.get::<_, Option<String>>(4)?,
+                r.get::<_, i64>(5)?,
+            ))
+        })?;
+        for r in rows {
+            let (old, new, rel, reason, model, at) = r?;
+            if let (Some(o), Some(n)) = (memory_ids.get(&old), memory_ids.get(&new)) {
+                ins.execute(params![o, n, rel, reason, model, at])?;
+            }
+        }
+        let mut checked = here.prepare(
+            "INSERT OR IGNORE INTO supersede_checked(memory_id, candidates, at) VALUES (?1, 0, ?2)",
+        )?;
+        let now = db::now_ms();
+        for id in memory_ids.values() {
+            checked.execute(params![id, now])?;
+        }
+    }
+
     // Incoming sessions are done: their memories came with them, and their transcripts
     // are not here to distil. Mark them so distillation never picks them up.
     {

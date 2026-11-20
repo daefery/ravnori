@@ -239,6 +239,23 @@ pub fn run(conn: &Connection) -> Result<bool> {
             );
         }
     }
+    if let Ok(s) = crate::supersede::status(conn)
+        && (s.links > 0 || s.calls_day > 0)
+    {
+        println!(
+            "replaced memories: {} older memories replaced by newer ones (recall shows the newer){} · {} of {} checks in 24 h · {} of the last {} days not checked yet",
+            s.replaced,
+            if crate::supersede::enabled() {
+                ""
+            } else {
+                ", off (recall.hide_replaced)"
+            },
+            s.calls_day,
+            s.budget,
+            s.unchecked,
+            crate::supersede::WINDOW_DAYS
+        );
+    }
     if let Ok(u) = crate::uptake::report(conn, 7)
         && u.since.is_some()
     {

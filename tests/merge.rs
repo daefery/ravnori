@@ -147,6 +147,24 @@ fn a_teammate_merge_adds_theirs_and_leaves_mine_untouched() {
         seed(&t, "claude:mine-1", "github.com/acme/shop", "My retry fix");
         ravnori::forget::remember(&t, "Deploy on Tuesdays only", Some("github.com/acme/shop"))
             .unwrap();
+        // Her memory about the deadlock replaced her tool memory (a link between two of
+        // her memories), and one to the forgotten session's memory, which stays here.
+        t.execute(
+            "INSERT INTO supersedes(old_id, new_id, relation, reason, model, at)
+             SELECT o.id, n.id, 'supersedes', 'the deadlock was found', 'm', 7
+               FROM memories o, memories n
+              WHERE o.title = 'Ana''s tool' AND n.title = 'Ana found the deadlock'",
+            [],
+        )
+        .unwrap();
+        t.execute(
+            "INSERT INTO supersedes(old_id, new_id, relation, reason, model, at)
+             SELECT o.id, n.id, 'duplicate', 'same', 'm', 7
+               FROM memories o, memories n
+              WHERE o.title = 'Forgotten here' AND n.title = 'Ana found the deadlock'",
+            [],
+        )
+        .unwrap();
     }
     let snap = snapshot_of(&theirs_path, &theirs_dir);
     let backups = home.join("backups");
@@ -258,6 +276,26 @@ fn a_teammate_merge_adds_theirs_and_leaves_mine_untouched() {
         (a.parse::<i64>().unwrap(), b.parse::<i64>().unwrap()),
         (ids[0], ids[1])
     );
+
+    // Her replacement link comes with her memories, both ends remapped; the one to a
+    // memory that did not come in is dropped. Merged memories count as checked.
+    assert_eq!(
+        q(
+            "SELECT o.title || ' -> ' || n.title || ' · ' || s.reason FROM supersedes s
+             JOIN memories o ON o.id = s.old_id JOIN memories n ON n.id = s.new_id"
+        ),
+        vec!["Ana's tool -> Ana found the deadlock · the deadlock was found"]
+    );
+    let unchecked: i64 = conn
+        .query_row(
+            "SELECT count(*) FROM memories m WHERE m.session_id LIKE 'claude:theirs%'
+               AND m.kind = 'observation'
+               AND NOT EXISTS (SELECT 1 FROM supersede_checked c WHERE c.memory_id = m.id)",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(unchecked, 0);
 
     // Their sessions are history: never re-read from a transcript, never distilled here.
     let live: i64 = conn
