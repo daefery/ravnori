@@ -1,12 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="420" viewBox="0 0 1280 420" role="img" aria-label="ravnori: memory for coding agents">
   <rect width="1280" height="420" rx="20" fill="#ffffff"/>
   <rect x="0.5" y="0.5" width="1279" height="419" rx="20" fill="none" stroke="#D6E2D6"/>
-  <g transform="translate(60,62) scale(0.4606060606060606)"><g transform="translate(1 1)">
-  <path d="M19 44L65 20L111 44L65 68Z" fill="#102825"/>
-  <path d="M19 66L65 90L111 66" fill="none" stroke="#102825" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M19 88L65 112L111 88" fill="none" stroke="#102825" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="65" cy="44" r="9" fill="#168F76"/>
-</g></g>
+  <g transform="translate(60,62) scale(0.4606060606060606)">
+  <path d="M30 114 C22 90 22 60 40 44 C54 31 76 28 92 37 C104 44 114 50 126 58 C114 62 102 66 90 70 C88 84 86 100 84 114 Z" fill="#102825"/>
+  <circle cx="68" cy="52" r="7.5" fill="#168F76"/>
+</g>
   <text x="134" y="112" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="46" font-weight="700" fill="#102825">ravnori</text>
   <text x="64" y="186" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="31" font-weight="700" fill="#102825">Your coding agents already write</text>
   <text x="64" y="226" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="31" font-weight="700" fill="#102825">everything down. <tspan fill="#137A64">ravnori remembers it.</tspan></text>

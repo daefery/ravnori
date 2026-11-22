@@ -29,14 +29,17 @@ THEMES = {
                   violet="#6d28d9", term="#102825", term_bar="#16332F", logo_ink="#102825", logo_dot="#168F76"),
 }
 
-# The strata mark (docs/assets/logo/), drawn on a 132-unit square; {ink} and {dot} are the
-# theme's colours (light: deep green; dark: pale).
-LOGO = """<g transform="translate({x},{y}) scale({s})"><g transform="translate(1 1)">
-  <path d="M19 44L65 20L111 44L65 68Z" fill="{ink}"/>
-  <path d="M19 66L65 90L111 66" fill="none" stroke="{ink}" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M19 88L65 112L111 88" fill="none" stroke="{ink}" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="65" cy="44" r="9" fill="{dot}"/>
-</g></g>"""
+# The raven mark (docs/assets/logo/, ui/logo.svg), drawn on a 132-unit square: a raven's
+# head in profile, its eye the accent. "Ravn" is Norwegian and Danish for raven; Odin's
+# ravens are Huginn (thought) and Muninn (memory). {ink} and {dot} are the theme's colours
+# (light: Forest and Teal; dark: Mist and Lime).
+RAVEN = ("M30 114 C22 90 22 60 40 44 C54 31 76 28 92 37 "
+         "C104 44 114 50 126 58 C114 62 102 66 90 70 C88 84 86 100 84 114 Z")
+EYE = (68, 52, 7.5)
+LOGO = """<g transform="translate({x},{y}) scale({s})">
+  <path d="{raven}" fill="{ink}"/>
+  <circle cx="{ex}" cy="{ey}" r="{er}" fill="{dot}"/>
+</g>"""
 
 
 def esc(s):
@@ -75,7 +78,7 @@ def hero(t):
     svg = f"""<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}" role="img" aria-label="ravnori: memory for coding agents">
   <rect width="{W}" height="{H}" rx="20" fill="{t['bg']}"/>
   <rect x="0.5" y="0.5" width="{W - 1}" height="{H - 1}" rx="20" fill="none" stroke="{t['rule']}"/>
-  {LOGO.format(x=60, y=62, s=0.95 * 64 / 132, ink=t['logo_ink'], dot=t['logo_dot'])}
+  {LOGO.format(raven=RAVEN, ex=EYE[0], ey=EYE[1], er=EYE[2], x=60, y=62, s=0.95 * 64 / 132, ink=t['logo_ink'], dot=t['logo_dot'])}
   <text x="134" y="112" font-family="{MONO}" font-size="46" font-weight="700" fill="{t['ink']}">ravnori</text>
   <text x="64" y="186" font-family="{SANS}" font-size="31" font-weight="700" fill="{t['ink']}">Your coding agents already write</text>
   <text x="64" y="226" font-family="{SANS}" font-size="31" font-weight="700" fill="{t['ink']}">everything down. <tspan fill="{t['teal']}">ravnori remembers it.</tspan></text>
@@ -116,7 +119,7 @@ def how(t):
     # ravnori (middle)
     mx, my, mw, mh = 380, 70, 470, 336
     parts.append(f'<rect x="{mx}" y="{my}" width="{mw}" height="{mh}" rx="16" fill="{t["panel2"]}" stroke="{t["teal"]}" stroke-width="2"/>')
-    parts.append(LOGO.format(x=mx + 18, y=my + 16, s=0.5 * 64 / 132, ink=t['logo_ink'], dot=t['logo_dot']))
+    parts.append(LOGO.format(raven=RAVEN, ex=EYE[0], ey=EYE[1], er=EYE[2], x=mx + 18, y=my + 16, s=0.5 * 64 / 132, ink=t['logo_ink'], dot=t['logo_dot']))
     parts.append(f'<text x="{mx + 58}" y="{my + 44}" font-family="{MONO}" font-size="22" font-weight="700" fill="{t["ink"]}">ravnori</text>')
     rows = [
         ("Capture", "reads transcripts as they grow; a crash or", "a missed hook delays it, never loses it"),
@@ -166,7 +169,43 @@ def terminal(t, title, command, lines, color_of):
     return f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{H}" viewBox="0 0 {width} {H}" role="img" aria-label="{label}">{"".join(p)}</svg>\n'
 
 
+def mark(ink, dot):
+    return LOGO.format(raven=RAVEN, ex=EYE[0], ey=EYE[1], er=EYE[2], x=0, y=0, s=1, ink=ink, dot=dot)
+
+
+# The app icon (favicon, avatars, the plugin): the raven in Mist with a Lime eye on a
+# Forest tile, the same in every theme. The raven is scaled to 0.8 and centred on the tile.
+def app_icon(size=132):
+    return f"""<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}" viewBox="0 0 132 132" role="img" aria-label="ravnori">
+  <rect width="132" height="132" rx="30" fill="#102825"/>
+  <g transform="translate(14 12) scale(0.8)">{mark("#E9F2E7", "#B5E38B")}</g>
+</svg>
+"""
+
+
+def logos():
+    """docs/assets/logo/ and the viewer's favicon, from the one shape above."""
+    out = os.path.join(HERE, "logo")
+    os.makedirs(out, exist_ok=True)
+    for name, t in THEMES.items():
+        ink, dot = t["logo_ink"], t["logo_dot"]
+        ground = f'<rect width="850" height="132" fill="{t["bg"]}"/>' if name == "dark" else ""
+        icon_ground = f'<rect width="132" height="132" fill="{t["bg"]}"/>' if name == "dark" else ""
+        with open(os.path.join(out, f"ravnori-{name}-icon.svg"), "w") as f:
+            f.write(f'<svg xmlns="http://www.w3.org/2000/svg" width="132" height="132" viewBox="0 0 132 132">'
+                    f'{icon_ground}{mark(ink, dot)}</svg>\n')
+        with open(os.path.join(out, f"ravnori-{name}-wordmark.svg"), "w") as f:
+            f.write(f'<svg xmlns="http://www.w3.org/2000/svg" width="850" height="132" viewBox="0 0 850 132">'
+                    f'{ground}{mark(ink, dot)}<text x="159" y="88" font-family="Inter, Manrope, DejaVu Sans, sans-serif" '
+                    f'font-size="71" font-weight="700" letter-spacing="-3" fill="{ink}">ravnori</text></svg>\n')
+    with open(os.path.join(out, "ravnori-app-icon.svg"), "w") as f:
+        f.write(app_icon())
+    with open(os.path.join(HERE, "..", "..", "ui", "logo.svg"), "w") as f:
+        f.write(app_icon())
+
+
 def main():
+    logos()
     for name, t in THEMES.items():
         write(f"hero-{name}.svg", hero(t))
         write(f"how-{name}.svg", how(t))

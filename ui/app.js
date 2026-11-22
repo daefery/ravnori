@@ -264,7 +264,7 @@
     loadMore();
   }
 
-  // New items arrive by polling; the logomark spins while they land. Polling stops
+  // New items arrive by polling; the raven blinks while they land. Polling stops
   // while the tab is hidden (no work on a device nobody is looking at) and catches up
   // when it is shown again, a page at a time, oldest first, so nothing is skipped.
   let polling = false;
